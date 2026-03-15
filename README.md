@@ -10,29 +10,35 @@ The goal is a correct, readable, and independently verifiable implementation of 
 
 ## Current status
 
-**v0.2.0-dev** — Syncing real blocks from the Cardano network with full validation.
+**v0.2.0-dev** — Syncing real blocks from the Cardano network with full validation, serving peers, and accepting wallet queries.
 
 | Layer | Status | Description |
 |-------|--------|-------------|
-| Serialization | Complete | CBOR encoder/decoder (RFC 8949), canonical mode, indefinite-length items |
-| Cardano types | Complete | All 7 eras: Byron, Shelley, Allegra, Mary, Alonzo, Babbage, Conway |
-| Networking | Complete | TCP connections, Ouroboros multiplexer, segment reassembly, all 10 mini-protocols |
+| Serialization | Complete | CBOR encoder/decoder (RFC 8949), canonical mode, indefinite-length |
+| Cardano types | Complete | All 7 eras: Byron through Conway, 3475 lines |
+| Networking | Complete | TCP client/server, Ouroboros mux, segment reassembly, all 10 mini-protocols |
+| P2P serving | Complete | Inbound peers, chain-sync server, block-fetch server, block propagation |
 | Consensus | Complete | Ouroboros Praos chain selection, VRF slot leader check, epoch arithmetic |
-| Cryptography | Partial | Blake2b-256/224 (pure OCaml + libsodium), Ed25519 verify/sign (libsodium), VRF/KES stubs |
+| Cryptography | Partial | Blake2b (pure OCaml + libsodium), Ed25519 (libsodium), VRF/KES stubs |
 | Block decoding | Complete | Era-aware deserialization, header/tx/address decoding, opcert extraction |
-| Ledger rules | Partial | UTXO validation, value conservation, deposits/withdrawals, Plutus collateral |
-| Storage | Complete | Content-addressed block store, chain index, crash-safe writes, LRU cache, snapshots |
-| Sync pipeline | Complete | Chain-sync + block-fetch + storage + validation, resumable, keep-alive |
-| Genesis | Complete | Shelley genesis parser, UTXO bootstrapping, protocol params |
+| Ledger rules | Complete | Full multi-asset UTXO, value conservation, deposits, Plutus collateral |
+| Storage | Complete | Content-addressed block store, crash-safe writes, LRU cache, snapshots |
+| Sync pipeline | Complete | Chain-sync + block-fetch + storage + validation, resumable |
+| Genesis | Complete | Shelley parser, preview/preprod/mainnet configs, UTXO bootstrapping |
+| Mempool | Complete | Fee-density ordering, revalidation, expiry, configurable limits |
+| Block production | Partial | Forging, opcert signing, slot leader election; VRF/KES pending |
+| Local server | Complete | Unix socket, state queries, tx submission, tx monitor |
+| Mithril import | Complete | Aggregator API, certificate chain, snapshot import |
+| Multi-network | Complete | Preview, preprod, mainnet genesis and configuration |
 
-**472 tests** across 30 test suites. All passing.
+**554 tests** across 38 test suites. All passing.
 
 ### Verified against real Cardano network
 
 - Handshake v15 negotiated with preview testnet relay
-- 2950+ blocks synced with **zero validation errors**
-- Full validation pipeline active: header checks, Ed25519 opcert verification, UTXO conservation
-- Crash-safe resume verified across 8 reconnection cycles
+- 5400+ blocks synced with **zero validation errors**
+- Full validation active: header + Ed25519 crypto + multi-asset UTXO conservation
+- Crash-safe resume verified across multiple reconnection cycles
 
 ## Architecture
 
@@ -40,7 +46,7 @@ The goal is a correct, readable, and independently verifiable implementation of 
 lib/
   ── Serialization ──
   cbor.ml                 — CBOR encoder/decoder (RFC 8949)
-  cardano_types.ml        — Block, transaction, certificate types for all 7 eras (3475 lines)
+  cardano_types.ml        — Block, transaction, certificate types for all 7 eras
 
   ── Cryptography ──
   crypto.ml               — Blake2b (RFC 7693), Ed25519 via libsodium FFI
@@ -49,17 +55,17 @@ lib/
   ── Consensus ──
   consensus.ml            — Ouroboros Praos chain selection, slot leader check
   epoch.ml                — Epoch/slot arithmetic, Byron→Shelley transition
+  slot_leader.ml          — VRF-based slot leader election
+  kes.ml                  — KES key management, opcert signing
 
-  ── Mini-protocols (node-to-node) ──
+  ── Mini-protocols ──
   miniprotocol.ml         — Protocol IDs, agency, handler signature
-  mux.ml                  — Ouroboros network multiplexer (segment framing)
+  mux.ml                  — Ouroboros network multiplexer
   handshake.ml            — Version negotiation (ID 0)
   chain_sync.ml           — Chain synchronization (ID 2)
   block_fetch.ml          — Block range download (ID 3)
   tx_submission.ml        — Transaction submission (ID 4)
   keep_alive.ml           — Connection liveness (ID 8)
-
-  ── Mini-protocols (node-to-client) ──
   local_chain_sync.ml     — Full-block chain sync (ID 5)
   local_state_query.ml    — Ledger state queries (ID 6)
   local_tx_submission.ml  — Local transaction submission (ID 7)
@@ -67,38 +73,61 @@ lib/
 
   ── Networking ──
   tcp_connection.ml       — TCP client with DNS, timeouts, error handling
-  network.ml              — Mux-to-TCP wiring, segment reassembly, keep-alive responder
+  tcp_server.ml           — TCP listener for inbound peers
+  network.ml              — Mux-to-TCP wiring, segment reassembly, keep-alive
+  peer_manager.ml         — Peer lifecycle, inbound/outbound tracking
 
-  ── Block processing ──
-  block_decoder.ml        — Era-aware block deserialization (7 eras)
-  tx_decoder.ml           — Transaction body decoding with all value-affecting fields
-  address.ml              — Address type parsing and credential extraction
+  ── P2P Serving ──
+  chain_sync_server.ml    — Serve block headers to peers
+  block_fetch_server.ml   — Serve full block bodies to peers
+  block_propagation.ml    — Announce new blocks to all peers
+
+  ── Block Processing ──
+  block_decoder.ml        — Era-aware block deserialization
+  tx_decoder.ml           — Transaction body decoding with all fields
+  multi_asset.ml          — Multi-asset value arithmetic
+  address.ml              — Address type parsing
 
   ── Validation ──
-  header_validation.ml    — Slot ordering, prev_hash, block_number, body hash, sizes
-  chain_validation.ml     — Chain integrity, genesis checks, break detection
-  block_validator.ml      — Opcert Ed25519 verification, key/sig size checks
-  utxo.ml                 — UTXO set, transaction validation, value conservation
-  ledger_state.ml         — Persistent UTXO state, snapshots, era-aware params
+  header_validation.ml    — Slot ordering, prev_hash, body hash, sizes
+  chain_validation.ml     — Chain integrity, genesis checks
+  block_validator.ml      — Opcert Ed25519 verification
+  utxo.ml                 — UTXO set, full multi-asset conservation
+  ledger_state.ml         — Persistent UTXO state, snapshots
 
-  ── Storage & sync ──
-  store.ml                — Content-addressed block store, chain index, LRU cache
-  sync_pipeline.ml        — Unified chain-sync + block-fetch + storage pipeline
-  genesis.ml              — Shelley genesis parser, UTXO bootstrapping
-  json.ml                 — Minimal JSON parser (zero dependencies)
+  ── Block Production ──
+  mempool.ml              — Transaction pool with fee-density ordering
+  block_forge.ml          — Block construction from mempool
+
+  ── Storage & Sync ──
+  store.ml                — Content-addressed block store, chain index
+  sync_pipeline.ml        — Unified chain-sync + block-fetch + storage
+  genesis.ml              — Genesis parser, multi-network configs
+  json.ml                 — Minimal JSON parser
+
+  ── Local Server ──
+  unix_listener.ml        — Unix domain socket listener
+  local_server.ml         — State queries, tx submission, tx monitor
+
+  ── Mithril ──
+  mithril_client.ml       — Aggregator API for preview/preprod/mainnet
+  mithril_verify.ml       — Certificate chain, digest verification
+  mithril_import.ml       — Snapshot unpacking, block import
 
 bin/
   connect.ml              — Handshake test
   sync.ml                 — Full sync pipeline with validation
   inspect.ml              — Block/tx inspection
   validate.ml             — Chain validation
+  import.ml               — Mithril snapshot import
+  node.ml                 — Full node with sync + local server
 ```
 
-**10,778 lines** of library code, **7,606 lines** of tests, **31 modules**.
+**12,455 lines** of library code, **9,107 lines** of tests, **46 modules**.
 
 ## Build
 
-Requires OCaml >= 4.14 and opam. Libsodium runtime library recommended for Ed25519 verification.
+Requires OCaml >= 4.14 and opam. Libsodium runtime recommended for Ed25519.
 
 ```
 opam install . --deps-only --with-test
@@ -106,36 +135,33 @@ dune build
 dune runtest
 ```
 
-### Sync from Cardano preview testnet
+### Quick start
 
 ```bash
-# Basic sync (headers + block bodies stored to disk)
-dune exec bin/sync.exe -- --data-dir ./data preview-node.play.dev.cardano.org 3001
+# Sync from preview testnet with full validation
+dune exec bin/sync.exe -- --full-validation --data-dir ./data \
+  preview-node.play.dev.cardano.org 3001
 
-# Full validation (header + crypto + UTXO checks on every block)
-dune exec bin/sync.exe -- --full-validation --data-dir ./data preview-node.play.dev.cardano.org 3001
+# Import from Mithril snapshot (fast bootstrap)
+dune exec bin/import.exe -- snapshot --network preview --data-dir ./data
 
 # Inspect a stored block
 dune exec bin/inspect.exe -- --data-dir ./data block 100
+
+# Run full node (sync + local server)
+dune exec bin/node.exe -- --data-dir ./data
 ```
 
 ## Roadmap
-
-Phases 1-5 substantially complete. Next:
-
-- **Phase 4** (remaining) — Full multi-asset UTXO tracking, Plutus script cost model validation, complete era-specific ledger rules
-- **Phase 6** — Block production: VRF proofs, KES signing, mempool, block forging
-- **Phase 7** — Integration: full genesis-to-tip sync, Haskell node interop testing, stability runs
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full breakdown.
 
 ## Design principles
 
-- **Spec-driven**: Every type, encoding, and state machine is derived from the Cardano CDDL specs, formal ledger specifications, Ouroboros papers, and relevant RFCs. No code is copied or adapted from existing implementations.
-- **Original work**: All code is original and verifiable by plagiarism detection tools (MOSS/JPlag). Every commit includes model attribution in the commit message.
-- **Test-first**: Each module ships with comprehensive round-trip tests, state machine validation, known test vectors, and pipe-based protocol simulations.
-- **Type-safe**: OCaml's type system enforces protocol invariants — era-specific transaction bodies, agency rules, credential types.
-- **Verified against real network**: Synced thousands of blocks from Cardano preview testnet with all validation layers active and zero errors.
+- **Spec-driven**: Derived from Cardano CDDL specs, formal ledger specs, Ouroboros papers, and RFCs. Zero code from existing implementations.
+- **Original work**: Verifiable by MOSS/JPlag. Every commit includes model attribution.
+- **Test-first**: 554 tests with round-trip encoding, state machine validation, known test vectors, pipe simulations, and real-network integration tests.
+- **Verified against real network**: 5400+ blocks from Cardano preview testnet with zero validation errors.
 
 ## License
 
