@@ -15,3 +15,4 @@ module Consensus = Consensus
 module Crypto = Crypto
 module Tcp_connection = Tcp_connection
 module Network = Network
+module Store = Store

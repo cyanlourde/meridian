@@ -1,7 +1,7 @@
-(* Meridian fetch — download full block bodies from a Cardano node.
+(* Meridian fetch — download full block bodies with on-disk storage.
 
-   Usage: fetch [host] [port] [max_blocks]
-   Default: preview-node.play.dev.cardano.org:3001, 500 blocks *)
+   Usage: fetch [--data-dir DIR] [host] [port] [max_blocks]
+   Default: preview-node.play.dev.cardano.org:3001, 500 blocks, ./meridian-data *)
 
 open Meridian
 
@@ -12,14 +12,21 @@ let () =
     Printf.printf "\nInterrupted, shutting down...\n%!";
     stop := true));
 
-  let host = if Array.length Sys.argv > 1 then Sys.argv.(1)
-             else "preview-node.play.dev.cardano.org" in
-  let port = if Array.length Sys.argv > 2 then int_of_string Sys.argv.(2)
-             else 3001 in
-  let max_blocks = if Array.length Sys.argv > 3 then int_of_string Sys.argv.(3)
-                   else 500 in
+  let data_dir = ref "./meridian-data" in
+  let args = Array.to_list Sys.argv |> List.tl in
+  let args = match args with
+    | "--data-dir" :: dir :: rest -> data_dir := dir; rest
+    | _ -> args
+  in
+  let host = match args with h :: _ -> h | [] -> "preview-node.play.dev.cardano.org" in
+  let port = match args with _ :: p :: _ -> int_of_string p | _ -> 3001 in
+  let max_blocks = match args with _ :: _ :: m :: _ -> int_of_string m | _ -> 500 in
 
   Printf.printf "Connecting to %s:%d...\n%!" host port;
+  Printf.printf "Data directory: %s\n%!" !data_dir;
+
+  let store = Store.init ~base_dir:!data_dir () in
+  Printf.printf "Store: %d blocks on disk\n%!" (Store.block_count store);
 
   let magic = Handshake.preview_magic in
   let versions = List.map (fun v ->
@@ -38,8 +45,10 @@ let () =
 
     Network.start_keep_alive_responder net;
 
-    Printf.printf "Collecting %d block points via chain-sync...\n%!" max_blocks;
-    (match Network.find_intersection net ~points:[Chain_sync.Origin] with
+    let chain_points = Store.get_chain_points store in
+    Printf.printf "Collecting %d block points via chain-sync (%d stored points)...\n%!"
+      max_blocks (List.length chain_points);
+    (match Network.find_intersection net ~points:chain_points with
      | Error e -> Printf.eprintf "FindIntersect failed: %s\n%!" e;
        Network.close net; exit 1
      | Ok (_, tip) ->
@@ -77,24 +86,23 @@ let () =
     let batch_size = 10 in
     let total_fetched = ref 0 in
     let total_bytes = ref 0 in
+    let total_stored = ref 0 in
     let fetching = ref true in
     let points_arr = Array.of_list points in
+    let batch_idx = ref 0 in
     let i = ref 0 in
     while !fetching && not !stop && !i < Array.length points_arr - 1 do
       let batch_end = min (Array.length points_arr - 1) (!i + batch_size - 1) in
       let from_pt = points_arr.(!i) in
       let to_pt = points_arr.(batch_end) in
-      let from_slot = match from_pt with
-        | Chain_sync.Point (s, _) -> s | Origin -> 0L in
-      let to_slot = match to_pt with
-        | Chain_sync.Point (s, _) -> s | Origin -> 0L in
+      incr batch_idx;
       (match Network.request_range net ~from_point:from_pt ~to_point:to_pt with
        | Error e ->
          Printf.eprintf "RequestRange failed: %s\n%!" e; fetching := false
        | Ok No_blocks ->
-         Printf.printf "No blocks for range slot %Ld..%Ld\n%!" from_slot to_slot;
          i := batch_end + 1
        | Ok Batch_started ->
+         let block_in_batch = ref 0 in
          let streaming = ref true in
          while !streaming && not !stop do
            match Network.recv_block net with
@@ -104,18 +112,29 @@ let () =
            | Ok None -> streaming := false
            | Ok (Some block_bytes) ->
              incr total_fetched;
+             incr block_in_batch;
              let sz = Bytes.length block_bytes in
              total_bytes := !total_bytes + sz;
+             (* Store block using the corresponding point *)
+             let pt_idx = !i + !block_in_batch - 1 in
+             if pt_idx < Array.length points_arr then begin
+               match points_arr.(pt_idx) with
+               | Chain_sync.Point (slot, hash) ->
+                 (match Store.store_block store ~slot ~hash ~cbor_bytes:block_bytes with
+                  | Ok () -> incr total_stored
+                  | Error _ -> ())
+               | _ -> ()
+             end;
              if !total_fetched <= 5 || !total_fetched mod 100 = 0 then
-               Printf.printf "  block %d: slot %Ld..%Ld (%d bytes)\n%!"
-                 !total_fetched from_slot to_slot sz
+               Printf.printf "  block %d: %d bytes (disk: %d)\n%!"
+                 !total_fetched sz (Store.block_count store)
          done;
          i := batch_end + 1);
     done;
 
     let (ka_recv, ka_sent, _) = Network.keep_alive_stats net in
-    Printf.printf "\nSummary: %d blocks fetched, %d bytes total (keep-alive: %d/%d)\n%!"
-      !total_fetched !total_bytes ka_recv ka_sent;
+    Printf.printf "\nSummary: %d blocks fetched, %d stored, %d bytes (ka: %d/%d, disk: %d)\n%!"
+      !total_fetched !total_stored !total_bytes ka_recv ka_sent (Store.block_count store);
 
     Network.stop_keep_alive_responder net;
     (match Network.block_fetch_done net with Ok () -> () | Error _ -> ());

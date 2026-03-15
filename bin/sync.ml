@@ -1,7 +1,7 @@
-(* Meridian sync — sync block headers from a Cardano node.
+(* Meridian sync — sync block headers from a Cardano node with on-disk storage.
 
-   Usage: sync [host] [port] [max_headers]
-   Default: preview-node.play.dev.cardano.org:3001, 10000 headers *)
+   Usage: sync [--data-dir DIR] [host] [port] [max_headers]
+   Default: preview-node.play.dev.cardano.org:3001, 10000 headers, ./meridian-data *)
 
 open Meridian
 
@@ -12,14 +12,23 @@ let () =
     Printf.printf "\nInterrupted, shutting down...\n%!";
     stop := true));
 
-  let host = if Array.length Sys.argv > 1 then Sys.argv.(1)
-             else "preview-node.play.dev.cardano.org" in
-  let port = if Array.length Sys.argv > 2 then int_of_string Sys.argv.(2)
-             else 3001 in
-  let max_headers = if Array.length Sys.argv > 3 then int_of_string Sys.argv.(3)
-                    else 10000 in
+  (* Parse args: optional --data-dir, then positional host port max *)
+  let data_dir = ref "./meridian-data" in
+  let args = Array.to_list Sys.argv |> List.tl in
+  let args = match args with
+    | "--data-dir" :: dir :: rest -> data_dir := dir; rest
+    | _ -> args
+  in
+  let host = match args with h :: _ -> h | [] -> "preview-node.play.dev.cardano.org" in
+  let port = match args with _ :: p :: _ -> int_of_string p | _ -> 3001 in
+  let max_headers = match args with _ :: _ :: m :: _ -> int_of_string m | _ -> 10000 in
 
   Printf.printf "Connecting to %s:%d...\n%!" host port;
+  Printf.printf "Data directory: %s\n%!" !data_dir;
+
+  (* Init store *)
+  let store = Store.init ~base_dir:!data_dir () in
+  Printf.printf "Store: %d blocks on disk\n%!" (Store.block_count store);
 
   let magic = Handshake.preview_magic in
   let versions = List.map (fun v ->
@@ -27,87 +36,80 @@ let () =
   ) [13L; 14L; 15L] in
 
   match Network.connect ~timeout_s:10.0 ~host ~port () with
-  | Error e ->
-    Printf.eprintf "Connection failed: %s\n%!" e; exit 1
+  | Error e -> Printf.eprintf "Connection failed: %s\n%!" e; exit 1
   | Ok net ->
     Printf.printf "Connected to %s\n%!" (Network.remote_addr net);
 
-    (* Handshake *)
     (match Network.perform_handshake net ~versions with
-     | Error e ->
-       Printf.eprintf "Handshake failed: %s\n%!" e;
+     | Error e -> Printf.eprintf "Handshake failed: %s\n%!" e;
        Network.close net; exit 1
-     | Ok (version, _params) ->
-       Printf.printf "Handshake OK: version %Ld\n%!" version);
+     | Ok (version, _) -> Printf.printf "Handshake OK: version %Ld\n%!" version);
 
-    (* Enable keep-alive responder *)
     Network.start_keep_alive_responder net;
-    Printf.printf "Keep-alive responder enabled\n%!";
 
-    (* Find intersection from origin *)
-    Printf.printf "Finding intersection from genesis...\n%!";
-    (match Network.find_intersection net ~points:[Chain_sync.Origin] with
-     | Error e ->
-       Printf.eprintf "FindIntersect failed: %s\n%!" e;
+    (* Use stored chain points for FindIntersect if we have data *)
+    let chain_points = Store.get_chain_points store in
+    Printf.printf "Finding intersection (%d points)...\n%!" (List.length chain_points);
+    (match Network.find_intersection net ~points:chain_points with
+     | Error e -> Printf.eprintf "FindIntersect failed: %s\n%!" e;
        Network.close net; exit 1
-     | Ok (_, tip) ->
+     | Ok (intersect, tip) ->
        let tip_slot = match tip.Chain_sync.tip_point with
-         | Origin -> 0L | Point (s, _) -> s
-       in
-       Printf.printf "Node tip: slot %Ld, block %Ld\n%!"
-         tip_slot tip.tip_block_number);
+         | Origin -> 0L | Point (s, _) -> s in
+       (match intersect with
+        | Some Origin -> Printf.printf "Intersection: origin\n%!"
+        | Some (Point (s, _)) -> Printf.printf "Intersection: slot %Ld\n%!" s
+        | None -> Printf.printf "No intersection (starting from genesis)\n%!");
+       Printf.printf "Node tip: slot %Ld, block %Ld\n%!" tip_slot tip.tip_block_number);
 
-    (* Sync loop *)
-    Printf.printf "Syncing headers (max %d)...\n%!" max_headers;
+    Printf.printf "Syncing (max %d new headers)...\n%!" max_headers;
     let count = ref 0 in
+    let stored = ref 0 in
     let running = ref true in
     while !running && not !stop && !count < max_headers do
       match Network.request_next net with
-      | Error e ->
-        Printf.eprintf "Sync error: %s\n%!" e;
-        running := false
-      | Ok (Roll_forward { header = _; tip }) ->
+      | Error e -> Printf.eprintf "Sync error: %s\n%!" e; running := false
+      | Ok (Roll_forward { header; tip }) ->
         incr count;
-        let slot = match tip.Chain_sync.tip_point with
-          | Origin -> 0L | Point (s, _) -> s
-        in
+        (* Extract point and store header as a block *)
+        (match Network.extract_point_from_header header with
+         | Ok (Chain_sync.Point (slot, hash)) ->
+           let cbor_bytes = Cbor.encode header in
+           (match Store.store_block store ~slot ~hash ~cbor_bytes with
+            | Ok () -> incr stored
+            | Error _ -> ())
+         | _ -> ());
         if !count <= 10 || !count mod 1000 = 0 || !count = max_headers then begin
           let (_ka_recv, ka_sent, _) = Network.keep_alive_stats net in
-          Printf.printf "[%d] tip slot %Ld, tip block %Ld (keep-alive: %d pings answered)\n%!"
-            !count slot tip.tip_block_number ka_sent
+          let tip_slot = match tip.Chain_sync.tip_point with
+            | Origin -> 0L | Point (s, _) -> s in
+          Printf.printf "[%d] tip slot %Ld, block %Ld | disk: %d blocks (ka: %d)\n%!"
+            !count tip_slot tip.tip_block_number (Store.block_count store) ka_sent
         end
       | Ok (Roll_backward { point; tip = _ }) ->
-        let pt_str = match point with
-          | Origin -> "origin"
-          | Point (s, _) -> Printf.sprintf "slot %Ld" s
-        in
-        Printf.printf "Rollback to %s\n%!" pt_str
+        Printf.printf "Rollback to %s\n%!" (match point with
+          | Origin -> "origin" | Point (s, _) -> Printf.sprintf "slot %Ld" s)
       | Ok Await_reply ->
         Printf.printf "At tip, waiting for new block...\n%!";
         (match Network.await_next net with
-         | Error e ->
-           Printf.eprintf "Await error: %s\n%!" e;
-           running := false
-         | Ok (Roll_forward { header = _; tip }) ->
+         | Error e -> Printf.eprintf "Await error: %s\n%!" e; running := false
+         | Ok (Roll_forward { header; tip = _ }) ->
            incr count;
-           let slot = match tip.Chain_sync.tip_point with
-             | Origin -> 0L | Point (s, _) -> s
-           in
-           Printf.printf "[%d] NEW BLOCK tip slot %Ld, tip block %Ld\n%!"
-             !count slot tip.tip_block_number
-         | Ok (Roll_backward { point; tip = _ }) ->
-           Printf.printf "Rollback to %s\n%!" (match point with
-             | Origin -> "origin" | Point (s, _) -> Printf.sprintf "slot %Ld" s)
-         | Ok Await_reply ->
-           Printf.eprintf "Unexpected double AwaitReply\n%!";
-           running := false)
+           (match Network.extract_point_from_header header with
+            | Ok (Chain_sync.Point (slot, hash)) ->
+              let cbor_bytes = Cbor.encode header in
+              ignore (Store.store_block store ~slot ~hash ~cbor_bytes)
+            | _ -> ());
+           Printf.printf "[%d] NEW BLOCK\n%!" !count
+         | Ok (Roll_backward _) -> Printf.printf "Rollback\n%!"
+         | Ok Await_reply -> Printf.eprintf "Double AwaitReply\n%!"; running := false)
     done;
 
     let (ka_recv, ka_sent, _) = Network.keep_alive_stats net in
-    Printf.printf "Synced %d headers (keep-alive: %d pings received, %d responses sent)\n%!"
-      !count ka_recv ka_sent;
+    Printf.printf "Synced %d headers, stored %d blocks (total on disk: %d)\n%!"
+      !count !stored (Store.block_count store);
+    Printf.printf "Keep-alive: %d received, %d sent\n%!" ka_recv ka_sent;
 
-    (* Clean shutdown *)
     Network.stop_keep_alive_responder net;
     (match Network.chain_sync_done net with Ok () -> () | Error _ -> ());
     Network.close net;
