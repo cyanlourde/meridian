@@ -33,4 +33,5 @@ module Mithril_client = Mithril_client
 module Mithril_verify = Mithril_verify
 module Mithril_import = Mithril_import
 module Unix_listener = Unix_listener
+module Mempool = Mempool
 module Local_server = Local_server
