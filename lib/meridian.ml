@@ -16,3 +16,4 @@ module Crypto = Crypto
 module Tcp_connection = Tcp_connection
 module Network = Network
 module Store = Store
+module Sync_pipeline = Sync_pipeline
