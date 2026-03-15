@@ -4,3 +4,6 @@ module Miniprotocol = Miniprotocol
 module Mux = Mux
 module Handshake = Handshake
 module Chain_sync = Chain_sync
+module Block_fetch = Block_fetch
+module Tx_submission = Tx_submission
+module Keep_alive = Keep_alive
