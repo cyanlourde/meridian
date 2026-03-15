@@ -1,3 +1,4 @@
 (library
  (name meridian)
- (public_name meridian))
+ (public_name meridian)
+ (libraries unix))
