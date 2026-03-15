@@ -11,5 +11,6 @@
         test_integration test_genesis test_conservation
         test_multi_asset test_mithril test_local_server
         test_mempool test_block_forge test_slot_leader test_peer
-        test_mainnet test_governance test_topology)
+        test_mainnet test_governance test_topology
+        test_kes_real test_vrf_real)
  (libraries meridian alcotest))
