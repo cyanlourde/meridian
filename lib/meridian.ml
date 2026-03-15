@@ -42,4 +42,5 @@ module Chain_sync_server = Chain_sync_server
 module Block_fetch_server = Block_fetch_server
 module Peer_manager = Peer_manager
 module Block_propagation = Block_propagation
+module Governance = Governance
 module Local_server = Local_server

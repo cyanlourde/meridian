@@ -128,7 +128,12 @@ let compute_deposits ?(key_deposit = 2000000L) ?(pool_deposit = 500000000L)
       refunds := Int64.add !refunds key_deposit
     | Cert_pool_registration ->
       deposits := Int64.add !deposits pool_deposit
-    | Cert_pool_retirement | Cert_other -> ()
+    | Cert_drep_registration deposit ->
+      deposits := Int64.add !deposits deposit
+    | Cert_drep_deregistration refund ->
+      refunds := Int64.add !refunds refund
+    | Cert_pool_retirement | Cert_drep_update | Cert_vote_delegation
+    | Cert_committee_auth | Cert_committee_resign | Cert_other -> ()
   ) certs;
   (!deposits, !refunds)
 
@@ -203,7 +208,8 @@ let validate_tx ?(min_fee_a = 44L) ?(min_fee_b = 155381L)
     let produced_outputs = List.fold_left (fun acc (out : Tx_decoder.tx_output) ->
       Multi_asset.add acc out.to_value) Multi_asset.zero tx.dt_outputs in
     let produced = Multi_asset.add produced_outputs
-      (Multi_asset.of_lovelace (Int64.add tx.dt_fee deposits)) in
+      (Multi_asset.of_lovelace
+         (Int64.add (Int64.add tx.dt_fee deposits) tx.dt_treasury_donation)) in
 
     let consumed_lovelace = Multi_asset.lovelace_of !consumed_value in
     if consumed_lovelace > 0L && not (Multi_asset.equal

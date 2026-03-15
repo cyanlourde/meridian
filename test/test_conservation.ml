@@ -32,6 +32,8 @@ let make_tx ?(fee = 200000L) ?(withdrawal = 0L) ?(certs = [])
     dt_collateral_return = collateral_return;
     dt_total_collateral = total_collateral;
     dt_is_valid = is_valid;
+    dt_voting_procedures = 0; dt_proposal_count = 0;
+    dt_treasury_donation = 0L;
     dt_era = Block_decoder.Shelley }
 
 let has_conservation_error errors =

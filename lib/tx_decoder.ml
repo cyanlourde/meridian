@@ -29,6 +29,12 @@ type cert_action =
   | Cert_stake_deregistration
   | Cert_pool_registration
   | Cert_pool_retirement
+  | Cert_drep_registration of int64    (* deposit amount *)
+  | Cert_drep_deregistration of int64  (* refund amount *)
+  | Cert_drep_update
+  | Cert_vote_delegation
+  | Cert_committee_auth
+  | Cert_committee_resign
   | Cert_other
 
 type decoded_tx = {
@@ -45,6 +51,9 @@ type decoded_tx = {
   dt_total_collateral : int64 option;
   dt_is_valid : bool;
   dt_era : Block_decoder.era;
+  dt_voting_procedures : int;     (* count of votes in this tx *)
+  dt_proposal_count : int;        (* count of governance proposals *)
+  dt_treasury_donation : int64;   (* key 22: lovelace donated to treasury *)
 }
 
 (* ================================================================ *)
@@ -110,8 +119,26 @@ let decode_cert_action = function
   | Cbor.Array (Cbor.Uint 1L :: _) -> Cert_stake_deregistration
   | Cbor.Array (Cbor.Uint 3L :: _) -> Cert_pool_registration
   | Cbor.Array (Cbor.Uint 4L :: _) -> Cert_pool_retirement
-  | Cbor.Array (Cbor.Uint 7L :: _) -> Cert_stake_registration
-  | Cbor.Array (Cbor.Uint 8L :: _) -> Cert_stake_deregistration
+  (* Conway certs with explicit deposits *)
+  | Cbor.Array [Cbor.Uint 7L; _cred; Cbor.Uint _deposit] ->
+    Cert_stake_registration  (* reg with deposit — same effect *)
+  | Cbor.Array [Cbor.Uint 8L; _cred; Cbor.Uint _refund] ->
+    Cert_stake_deregistration
+  | Cbor.Array (Cbor.Uint 9L :: _) -> Cert_vote_delegation
+  | Cbor.Array (Cbor.Uint 10L :: _) -> Cert_vote_delegation
+  | Cbor.Array (Cbor.Uint 11L :: _) -> Cert_stake_registration
+  | Cbor.Array (Cbor.Uint 12L :: _) -> Cert_vote_delegation
+  | Cbor.Array (Cbor.Uint 13L :: _) -> Cert_stake_registration
+  | Cbor.Array (Cbor.Uint 14L :: _) -> Cert_committee_auth
+  | Cbor.Array (Cbor.Uint 15L :: _) -> Cert_committee_resign
+  (* DRep certs *)
+  | Cbor.Array [Cbor.Uint 16L; _cred; Cbor.Uint deposit; _anchor] ->
+    Cert_drep_registration deposit
+  | Cbor.Array [Cbor.Uint 16L; _cred; Cbor.Uint deposit] ->
+    Cert_drep_registration deposit
+  | Cbor.Array [Cbor.Uint 17L; _cred; Cbor.Uint refund] ->
+    Cert_drep_deregistration refund
+  | Cbor.Array (Cbor.Uint 18L :: _) -> Cert_drep_update
   | _ -> Cert_other
 
 let sum_withdrawals = function
@@ -174,7 +201,17 @@ let decode_map_tx_body era pairs =
        dt_collateral_return = collateral_return;
        dt_total_collateral = total_collateral;
        dt_is_valid = true;
-       dt_era = era }
+       dt_era = era;
+       dt_voting_procedures = (match find 19 pairs with
+         | Some (Cbor.Map voters) ->
+           List.fold_left (fun acc (_, v) ->
+             match v with Cbor.Map actions -> acc + List.length actions | _ -> acc
+           ) 0 voters
+         | _ -> 0);
+       dt_proposal_count = (match find 20 pairs with
+         | Some (Cbor.Array items) -> List.length items | _ -> 0);
+       dt_treasury_donation = (match find 22 pairs with
+         | Some (Cbor.Uint n) -> n | _ -> 0L) }
 
 let decode_transaction ~era cbor =
   match era, cbor with
@@ -199,7 +236,9 @@ let decode_transaction ~era cbor =
          dt_mint = Multi_asset.zero;
          dt_collateral_inputs = []; dt_collateral_return = None;
          dt_total_collateral = None; dt_is_valid = true;
-         dt_era = era }
+         dt_era = era;
+         dt_voting_procedures = 0; dt_proposal_count = 0;
+         dt_treasury_donation = 0L }
   | _, Cbor.Map pairs ->
     decode_map_tx_body era pairs
   | _ -> Error "transaction: expected map (Shelley+) or array (Byron)"

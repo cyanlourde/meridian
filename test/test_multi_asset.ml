@@ -167,6 +167,8 @@ let test_conservation_with_mint () =
     dt_mint = mint_val;
     dt_collateral_inputs = []; dt_collateral_return = None;
     dt_total_collateral = None; dt_is_valid = true;
+    dt_voting_procedures = 0; dt_proposal_count = 0;
+    dt_treasury_donation = 0L;
     dt_era = Shelley } in
   let errors = Utxo.validate_tx ~min_utxo_value:1000000L
     ~utxo ~current_slot:100L tx in
@@ -194,6 +196,8 @@ let test_conservation_with_burn () =
     dt_mint = burn_val;
     dt_collateral_inputs = []; dt_collateral_return = None;
     dt_total_collateral = None; dt_is_valid = true;
+    dt_voting_procedures = 0; dt_proposal_count = 0;
+    dt_treasury_donation = 0L;
     dt_era = Shelley } in
   let errors = Utxo.validate_tx ~min_utxo_value:1000000L
     ~utxo ~current_slot:100L tx in

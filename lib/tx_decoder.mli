@@ -11,7 +11,11 @@ type tx_output = {
 
 type cert_action =
   | Cert_stake_registration | Cert_stake_deregistration
-  | Cert_pool_registration | Cert_pool_retirement | Cert_other
+  | Cert_pool_registration | Cert_pool_retirement
+  | Cert_drep_registration of int64 | Cert_drep_deregistration of int64
+  | Cert_drep_update | Cert_vote_delegation
+  | Cert_committee_auth | Cert_committee_resign
+  | Cert_other
 
 type decoded_tx = {
   dt_inputs : tx_input list;
@@ -27,6 +31,9 @@ type decoded_tx = {
   dt_total_collateral : int64 option;
   dt_is_valid : bool;
   dt_era : Block_decoder.era;
+  dt_voting_procedures : int;
+  dt_proposal_count : int;
+  dt_treasury_donation : int64;
 }
 
 val decode_transaction :
