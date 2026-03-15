@@ -1,3 +1,3 @@
 (executables
- (names main connect)
+ (names main connect sync)
  (libraries meridian))
