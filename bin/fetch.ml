@@ -1,12 +1,7 @@
 (* Meridian fetch — download full block bodies from a Cardano node.
 
    Usage: fetch [host] [port] [max_blocks]
-   Default: preview-node.play.dev.cardano.org:3001, 100 blocks
-
-   1. Connects and handshakes
-   2. Runs chain-sync to collect block points (slot + hash)
-   3. Uses block-fetch to download full blocks in batches
-   4. Prints block info and summary *)
+   Default: preview-node.play.dev.cardano.org:3001, 500 blocks *)
 
 open Meridian
 
@@ -22,7 +17,7 @@ let () =
   let port = if Array.length Sys.argv > 2 then int_of_string Sys.argv.(2)
              else 3001 in
   let max_blocks = if Array.length Sys.argv > 3 then int_of_string Sys.argv.(3)
-                   else 100 in
+                   else 500 in
 
   Printf.printf "Connecting to %s:%d...\n%!" host port;
 
@@ -36,13 +31,13 @@ let () =
   | Ok net ->
     Printf.printf "Connected to %s\n%!" (Network.remote_addr net);
 
-    (* Handshake *)
     (match Network.perform_handshake net ~versions with
      | Error e -> Printf.eprintf "Handshake failed: %s\n%!" e;
        Network.close net; exit 1
      | Ok (version, _) -> Printf.printf "Handshake OK: version %Ld\n%!" version);
 
-    (* Chain-sync: collect block points from headers *)
+    Network.start_keep_alive_responder net;
+
     Printf.printf "Collecting %d block points via chain-sync...\n%!" max_blocks;
     (match Network.find_intersection net ~points:[Chain_sync.Origin] with
      | Error e -> Printf.eprintf "FindIntersect failed: %s\n%!" e;
@@ -59,7 +54,6 @@ let () =
         Printf.eprintf "Chain-sync error: %s\n%!" e; collecting := false
       | Ok (Roll_forward { header; tip = _ }) ->
         incr header_count;
-        (* Extract actual block point from the header *)
         (match Network.extract_point_from_header header with
          | Ok (Chain_sync.Point _ as pt) -> points := pt :: !points
          | _ -> ());
@@ -80,7 +74,6 @@ let () =
       Network.close net; exit 0
     end;
 
-    (* Block-fetch: download in batches *)
     let batch_size = 10 in
     let total_fetched = ref 0 in
     let total_bytes = ref 0 in
@@ -97,8 +90,7 @@ let () =
         | Chain_sync.Point (s, _) -> s | Origin -> 0L in
       (match Network.request_range net ~from_point:from_pt ~to_point:to_pt with
        | Error e ->
-         Printf.eprintf "RequestRange failed: %s\n%!" e;
-         fetching := false
+         Printf.eprintf "RequestRange failed: %s\n%!" e; fetching := false
        | Ok No_blocks ->
          Printf.printf "No blocks for range slot %Ld..%Ld\n%!" from_slot to_slot;
          i := batch_end + 1
@@ -109,22 +101,23 @@ let () =
            | Error e ->
              Printf.eprintf "Block recv error: %s\n%!" e;
              streaming := false; fetching := false
-           | Ok None -> streaming := false  (* BatchDone *)
+           | Ok None -> streaming := false
            | Ok (Some block_bytes) ->
              incr total_fetched;
              let sz = Bytes.length block_bytes in
              total_bytes := !total_bytes + sz;
-             if !total_fetched <= 5 || !total_fetched mod 50 = 0 then
+             if !total_fetched <= 5 || !total_fetched mod 100 = 0 then
                Printf.printf "  block %d: slot %Ld..%Ld (%d bytes)\n%!"
                  !total_fetched from_slot to_slot sz
          done;
          i := batch_end + 1);
     done;
 
-    Printf.printf "\nSummary: %d blocks fetched, %d bytes total\n%!"
-      !total_fetched !total_bytes;
+    let (ka_recv, ka_sent, _) = Network.keep_alive_stats net in
+    Printf.printf "\nSummary: %d blocks fetched, %d bytes total (keep-alive: %d/%d)\n%!"
+      !total_fetched !total_bytes ka_recv ka_sent;
 
-    (* Clean shutdown *)
+    Network.stop_keep_alive_responder net;
     (match Network.block_fetch_done net with Ok () -> () | Error _ -> ());
     (match Network.chain_sync_done net with Ok () -> () | Error _ -> ());
     Network.close net;

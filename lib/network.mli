@@ -2,7 +2,8 @@
 
     Connects the multiplexer to a TCP socket and provides high-level
     operations for handshake, chain-sync, block-fetch, and mini-protocol
-    messaging. Handles demultiplexing with per-protocol buffering. *)
+    messaging. Handles demultiplexing with per-protocol buffering and
+    transparent keep-alive auto-response. *)
 
 type t
 
@@ -18,17 +19,23 @@ val perform_handshake :
   t -> versions:(Handshake.version_number * Handshake.version_params) list ->
   (Handshake.version_number * Handshake.version_params, string) result
 
+(** {1 Keep-alive} *)
+
+val start_keep_alive_responder : t -> unit
+(** Enable automatic keep-alive ping response. When a MsgKeepAlive
+    arrives on protocol ID 8 while waiting for any other protocol's
+    message, the response is sent immediately and transparently. *)
+
+val stop_keep_alive_responder : t -> unit
+
+val keep_alive_stats : t -> int * int * float
+(** [(pings_received, responses_sent, last_ping_time)] *)
+
 (** {1 Chain-sync} *)
 
 type sync_event =
-  | Roll_forward of {
-      header : Cbor.cbor_value;
-      tip : Chain_sync.tip;
-    }
-  | Roll_backward of {
-      point : Chain_sync.point;
-      tip : Chain_sync.tip;
-    }
+  | Roll_forward of { header : Cbor.cbor_value; tip : Chain_sync.tip }
+  | Roll_backward of { point : Chain_sync.point; tip : Chain_sync.tip }
   | Await_reply
 
 val find_intersection :
@@ -36,36 +43,26 @@ val find_intersection :
   (Chain_sync.point option * Chain_sync.tip, string) result
 
 val request_next : t -> (sync_event, string) result
-
 val await_next : t -> (sync_event, string) result
-
 val chain_sync_done : t -> (unit, string) result
 
 (** {1 Header point extraction} *)
 
 val extract_point_from_header :
   Cbor.cbor_value -> (Chain_sync.point, string) result
-(** Extract a block point (slot + hash) from a chain-sync RollForward header.
-    Computes the block hash as Blake2b-256 of the serialized header bytes. *)
 
 (** {1 Block-fetch} *)
 
-type fetch_result =
-  | Batch_started
-  | No_blocks
+type fetch_result = Batch_started | No_blocks
 
 val request_range :
   t -> from_point:Chain_sync.point -> to_point:Chain_sync.point ->
   (fetch_result, string) result
 
 val recv_block : t -> (bytes option, string) result
-(** After [Batch_started], receive blocks one at a time.
-    Returns [Some bytes] per block, [None] when batch is complete. *)
-
 val block_fetch_done : t -> (unit, string) result
 
 (** {1 Connection management} *)
 
 val close : t -> unit
-
 val remote_addr : t -> string

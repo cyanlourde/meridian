@@ -1,19 +1,13 @@
 (* Meridian sync — sync block headers from a Cardano node.
 
    Usage: sync [host] [port] [max_headers]
-   Default: preview-node.play.dev.cardano.org:3001, 5000 headers *)
+   Default: preview-node.play.dev.cardano.org:3001, 10000 headers *)
 
 open Meridian
-
-let hex_of_bytes b =
-  let buf = Buffer.create (Bytes.length b * 2) in
-  Bytes.iter (fun c -> Buffer.add_string buf (Printf.sprintf "%02x" (Char.code c))) b;
-  Buffer.contents buf
 
 let stop = ref false
 
 let () =
-  (* Handle Ctrl-C for clean shutdown *)
   Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
     Printf.printf "\nInterrupted, shutting down...\n%!";
     stop := true));
@@ -23,7 +17,7 @@ let () =
   let port = if Array.length Sys.argv > 2 then int_of_string Sys.argv.(2)
              else 3001 in
   let max_headers = if Array.length Sys.argv > 3 then int_of_string Sys.argv.(3)
-                    else 5000 in
+                    else 10000 in
 
   Printf.printf "Connecting to %s:%d...\n%!" host port;
 
@@ -34,8 +28,7 @@ let () =
 
   match Network.connect ~timeout_s:10.0 ~host ~port () with
   | Error e ->
-    Printf.eprintf "Connection failed: %s\n%!" e;
-    exit 1
+    Printf.eprintf "Connection failed: %s\n%!" e; exit 1
   | Ok net ->
     Printf.printf "Connected to %s\n%!" (Network.remote_addr net);
 
@@ -47,24 +40,20 @@ let () =
      | Ok (version, _params) ->
        Printf.printf "Handshake OK: version %Ld\n%!" version);
 
+    (* Enable keep-alive responder *)
+    Network.start_keep_alive_responder net;
+    Printf.printf "Keep-alive responder enabled\n%!";
+
     (* Find intersection from origin *)
     Printf.printf "Finding intersection from genesis...\n%!";
     (match Network.find_intersection net ~points:[Chain_sync.Origin] with
      | Error e ->
        Printf.eprintf "FindIntersect failed: %s\n%!" e;
        Network.close net; exit 1
-     | Ok (intersect, tip) ->
+     | Ok (_, tip) ->
        let tip_slot = match tip.Chain_sync.tip_point with
-         | Origin -> 0L
-         | Point (s, _) -> s
+         | Origin -> 0L | Point (s, _) -> s
        in
-       (match intersect with
-        | Some Origin -> Printf.printf "Intersection: origin\n%!"
-        | Some (Point (s, h)) ->
-          Printf.printf "Intersection: slot %Ld, hash %s\n%!" s
-            (hex_of_bytes (Bytes.sub h 0 (min 8 (Bytes.length h))))
-        | None ->
-          Printf.printf "No intersection found (starting from genesis)\n%!");
        Printf.printf "Node tip: slot %Ld, block %Ld\n%!"
          tip_slot tip.tip_block_number);
 
@@ -82,9 +71,11 @@ let () =
         let slot = match tip.Chain_sync.tip_point with
           | Origin -> 0L | Point (s, _) -> s
         in
-        if !count <= 10 || !count mod 1000 = 0 || !count = max_headers then
-          Printf.printf "[%d] tip slot %Ld, tip block %Ld\n%!"
-            !count slot tip.tip_block_number
+        if !count <= 10 || !count mod 1000 = 0 || !count = max_headers then begin
+          let (_ka_recv, ka_sent, _) = Network.keep_alive_stats net in
+          Printf.printf "[%d] tip slot %Ld, tip block %Ld (keep-alive: %d pings answered)\n%!"
+            !count slot tip.tip_block_number ka_sent
+        end
       | Ok (Roll_backward { point; tip = _ }) ->
         let pt_str = match point with
           | Origin -> "origin"
@@ -93,7 +84,6 @@ let () =
         Printf.printf "Rollback to %s\n%!" pt_str
       | Ok Await_reply ->
         Printf.printf "At tip, waiting for new block...\n%!";
-        (* Wait for the next block *)
         (match Network.await_next net with
          | Error e ->
            Printf.eprintf "Await error: %s\n%!" e;
@@ -106,21 +96,19 @@ let () =
            Printf.printf "[%d] NEW BLOCK tip slot %Ld, tip block %Ld\n%!"
              !count slot tip.tip_block_number
          | Ok (Roll_backward { point; tip = _ }) ->
-           let pt_str = match point with
-             | Origin -> "origin"
-             | Point (s, _) -> Printf.sprintf "slot %Ld" s
-           in
-           Printf.printf "Rollback to %s\n%!" pt_str
+           Printf.printf "Rollback to %s\n%!" (match point with
+             | Origin -> "origin" | Point (s, _) -> Printf.sprintf "slot %Ld" s)
          | Ok Await_reply ->
            Printf.eprintf "Unexpected double AwaitReply\n%!";
            running := false)
     done;
 
-    Printf.printf "Synced %d headers\n%!" !count;
+    let (ka_recv, ka_sent, _) = Network.keep_alive_stats net in
+    Printf.printf "Synced %d headers (keep-alive: %d pings received, %d responses sent)\n%!"
+      !count ka_recv ka_sent;
 
     (* Clean shutdown *)
-    (match Network.chain_sync_done net with
-     | Ok () -> ()
-     | Error _ -> ());
+    Network.stop_keep_alive_responder net;
+    (match Network.chain_sync_done net with Ok () -> () | Error _ -> ());
     Network.close net;
     Printf.printf "Done.\n%!"
