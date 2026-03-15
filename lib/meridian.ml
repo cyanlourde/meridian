@@ -17,3 +17,6 @@ module Tcp_connection = Tcp_connection
 module Network = Network
 module Store = Store
 module Sync_pipeline = Sync_pipeline
+module Address = Address
+module Block_decoder = Block_decoder
+module Tx_decoder = Tx_decoder

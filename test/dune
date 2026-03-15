@@ -4,5 +4,6 @@
         test_local_chain_sync test_local_state_query
         test_local_tx_submission test_local_tx_monitor
         test_consensus test_crypto test_network test_chain_sync_live
-        test_keep_alive_live test_store test_sync_pipeline)
+        test_keep_alive_live test_store test_sync_pipeline
+        test_block_decoder test_tx_decoder)
  (libraries meridian alcotest))
