@@ -34,4 +34,7 @@ module Mithril_verify = Mithril_verify
 module Mithril_import = Mithril_import
 module Unix_listener = Unix_listener
 module Mempool = Mempool
+module Slot_leader = Slot_leader
+module Kes = Kes
+module Block_forge = Block_forge
 module Local_server = Local_server
