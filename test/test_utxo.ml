@@ -30,8 +30,10 @@ let make_output ?(lovelace = 2000000L) () : Tx_decoder.tx_output =
 let make_tx ?(fee = 200000L) ?(ttl = None) inputs outputs : Tx_decoder.decoded_tx =
   { dt_inputs = inputs; dt_outputs = outputs; dt_fee = fee;
     dt_ttl = ttl; dt_validity_start = None;
-    dt_cert_count = 0; dt_withdrawal_count = 0;
-    dt_mint = false; dt_collateral_count = 0;
+    dt_certs = []; dt_withdrawal_total = 0L;
+    dt_mint = false; dt_collateral_inputs = [];
+    dt_collateral_return = None; dt_total_collateral = None;
+    dt_is_valid = true;
     dt_era = Block_decoder.Shelley }
 
 (* ================================================================ *)

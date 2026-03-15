@@ -8,6 +8,8 @@ type protocol_params = {
   min_utxo_value : int64;
   max_tx_size : int;
   max_block_size : int;
+  key_deposit : int64;
+  pool_deposit : int64;
 }
 
 val shelley_params : protocol_params

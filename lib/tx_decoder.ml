@@ -2,7 +2,11 @@
 
    Decodes raw CBOR transaction bodies into structured types.
    Shelley+ txs follow: {0: inputs, 1: outputs, 2: fee, ...}
-   Byron txs follow: [inputs, outputs, attributes] *)
+   Byron txs follow: [inputs, outputs, attributes]
+
+   Extracts all fields affecting value conservation:
+   inputs, outputs, fee, withdrawals, certificates (deposits/refunds),
+   collateral inputs, collateral return, total collateral, mint flag. *)
 
 let ( let* ) = Result.bind
 
@@ -23,16 +27,27 @@ type tx_output = {
   to_has_script_ref : bool;
 }
 
+(** Certificate types relevant to deposit tracking. *)
+type cert_action =
+  | Cert_stake_registration      (** costs key_deposit *)
+  | Cert_stake_deregistration    (** refunds key_deposit *)
+  | Cert_pool_registration       (** costs pool_deposit *)
+  | Cert_pool_retirement         (** refunds pool_deposit at retirement epoch *)
+  | Cert_other                   (** no deposit effect *)
+
 type decoded_tx = {
   dt_inputs : tx_input list;
   dt_outputs : tx_output list;
   dt_fee : int64;
   dt_ttl : int64 option;
   dt_validity_start : int64 option;
-  dt_cert_count : int;
-  dt_withdrawal_count : int;
+  dt_certs : cert_action list;
+  dt_withdrawal_total : int64;  (** Sum of all withdrawal amounts *)
   dt_mint : bool;
-  dt_collateral_count : int;
+  dt_collateral_inputs : tx_input list;
+  dt_collateral_return : tx_output option;
+  dt_total_collateral : int64 option;
+  dt_is_valid : bool;           (** true for normal txs, false for failed Plutus *)
   dt_era : Block_decoder.era;
 }
 
@@ -74,9 +89,7 @@ let decode_mary_output = function
 let decode_alonzo_output = function
   | Cbor.Array [Cbor.Bytes addr; val_cbor] ->
     let lovelace = match val_cbor with
-      | Cbor.Uint n -> n
-      | Cbor.Array (Cbor.Uint n :: _) -> n
-      | _ -> 0L in
+      | Cbor.Uint n -> n | Cbor.Array (Cbor.Uint n :: _) -> n | _ -> 0L in
     let multi_asset = match val_cbor with
       | Cbor.Array (_ :: _ :: _) -> true | _ -> false in
     Ok { to_address = addr; to_lovelace = lovelace;
@@ -84,9 +97,7 @@ let decode_alonzo_output = function
          to_has_script_ref = false }
   | Cbor.Array [Cbor.Bytes addr; val_cbor; _datum_hash] ->
     let lovelace = match val_cbor with
-      | Cbor.Uint n -> n
-      | Cbor.Array (Cbor.Uint n :: _) -> n
-      | _ -> 0L in
+      | Cbor.Uint n -> n | Cbor.Array (Cbor.Uint n :: _) -> n | _ -> 0L in
     Ok { to_address = addr; to_lovelace = lovelace;
          to_has_multi_asset = false; to_has_datum = true;
          to_has_script_ref = false }
@@ -98,21 +109,42 @@ let decode_babbage_output = function
       | Some (Cbor.Bytes a) -> a | _ -> Bytes.empty in
     let lovelace = match find_map_uint_key 1 pairs with
       | Some (Cbor.Uint n) -> n
-      | Some (Cbor.Array (Cbor.Uint n :: _)) -> n
-      | _ -> 0L in
+      | Some (Cbor.Array (Cbor.Uint n :: _)) -> n | _ -> 0L in
     let multi_asset = match find_map_uint_key 1 pairs with
       | Some (Cbor.Array (_ :: _ :: _)) -> true | _ -> false in
     let has_datum = find_map_uint_key 2 pairs <> None in
     let has_script = find_map_uint_key 3 pairs <> None in
     Ok { to_address = addr; to_lovelace = lovelace;
          to_has_multi_asset = multi_asset;
-         to_has_datum = has_datum;
-         to_has_script_ref = has_script }
-  (* Legacy array format also accepted in Babbage *)
+         to_has_datum = has_datum; to_has_script_ref = has_script }
   | cbor -> decode_alonzo_output cbor
 
 (* ================================================================ *)
-(* Transaction body decoder (CBOR map for Shelley+)                  *)
+(* Certificate parsing (deposit-relevant only)                       *)
+(* ================================================================ *)
+
+let decode_cert_action = function
+  | Cbor.Array (Cbor.Uint 0L :: _) -> Cert_stake_registration
+  | Cbor.Array (Cbor.Uint 1L :: _) -> Cert_stake_deregistration
+  | Cbor.Array (Cbor.Uint 3L :: _) -> Cert_pool_registration
+  | Cbor.Array (Cbor.Uint 4L :: _) -> Cert_pool_retirement
+  | Cbor.Array (Cbor.Uint 7L :: _) -> Cert_stake_registration  (* Conway reg_cert *)
+  | Cbor.Array (Cbor.Uint 8L :: _) -> Cert_stake_deregistration (* Conway unreg_cert *)
+  | _ -> Cert_other
+
+(* ================================================================ *)
+(* Withdrawal total                                                  *)
+(* ================================================================ *)
+
+let sum_withdrawals = function
+  | Cbor.Map pairs ->
+    List.fold_left (fun acc (_, v) ->
+      match v with Cbor.Uint n -> Int64.add acc n | _ -> acc
+    ) 0L pairs
+  | _ -> 0L
+
+(* ================================================================ *)
+(* Transaction body decoder                                          *)
 (* ================================================================ *)
 
 let list_map_ok f items =
@@ -140,26 +172,35 @@ let decode_map_tx_body era pairs =
     | Some (Cbor.Uint n) -> Some n | _ -> None in
   let validity_start = match find 8 pairs with
     | Some (Cbor.Uint n) -> Some n | _ -> None in
-  let cert_count = match find 4 pairs with
-    | Some (Cbor.Array items) -> List.length items | _ -> 0 in
-  let withdrawal_count = match find 5 pairs with
-    | Some (Cbor.Map items) -> List.length items | _ -> 0 in
+  let certs = match find 4 pairs with
+    | Some (Cbor.Array items) -> List.map decode_cert_action items
+    | _ -> [] in
+  let withdrawal_total = match find 5 pairs with
+    | Some wds -> sum_withdrawals wds | None -> 0L in
   let mint = find 9 pairs <> None in
-  let collateral_count = match find 13 pairs with
-    | Some (Cbor.Array items) -> List.length items | _ -> 0 in
+  let collateral_inputs = match find 13 pairs with
+    | Some (Cbor.Array items) ->
+      List.filter_map (fun c -> match decode_input c with Ok i -> Some i | _ -> None) items
+    | _ -> [] in
+  let collateral_return = match find 16 pairs with
+    | Some cbor -> (match decode_babbage_output cbor with Ok o -> Some o | _ -> None)
+    | None -> None in
+  let total_collateral = match find 17 pairs with
+    | Some (Cbor.Uint n) -> Some n | _ -> None in
   Ok { dt_inputs = inputs; dt_outputs = outputs; dt_fee = fee;
        dt_ttl = ttl; dt_validity_start = validity_start;
-       dt_cert_count = cert_count; dt_withdrawal_count = withdrawal_count;
-       dt_mint = mint; dt_collateral_count = collateral_count;
+       dt_certs = certs; dt_withdrawal_total = withdrawal_total;
+       dt_mint = mint;
+       dt_collateral_inputs = collateral_inputs;
+       dt_collateral_return = collateral_return;
+       dt_total_collateral = total_collateral;
+       dt_is_valid = true;  (* set by caller from outer tx wrapper *)
        dt_era = era }
 
 (* ================================================================ *)
 (* Public API                                                        *)
 (* ================================================================ *)
 
-(** Decode a transaction body from CBOR.
-    For Shelley+ eras, the tx_body is a CBOR map with integer keys.
-    For Byron, the tx_body is a [inputs, outputs, attributes] array. *)
 let decode_transaction ~era cbor =
   match era, cbor with
   | Block_decoder.Byron, Cbor.Array [Cbor.Array inputs; Cbor.Array outputs; _attrs] ->
@@ -178,11 +219,12 @@ let decode_transaction ~era cbor =
              to_has_script_ref = false }
       | _ -> Error "byron output: expected [addr, coin]"
     ) outputs in
-    let fee = 0L in  (* Byron fee is computed, not explicit *)
-    Ok { dt_inputs; dt_outputs; dt_fee = fee;
+    Ok { dt_inputs; dt_outputs; dt_fee = 0L;
          dt_ttl = None; dt_validity_start = None;
-         dt_cert_count = 0; dt_withdrawal_count = 0;
-         dt_mint = false; dt_collateral_count = 0;
+         dt_certs = []; dt_withdrawal_total = 0L;
+         dt_mint = false;
+         dt_collateral_inputs = []; dt_collateral_return = None;
+         dt_total_collateral = None; dt_is_valid = true;
          dt_era = era }
   | _, Cbor.Map pairs ->
     decode_map_tx_body era pairs

@@ -10,11 +10,13 @@
 (* ================================================================ *)
 
 type protocol_params = {
-  min_fee_a : int64;        (** Per-byte fee coefficient *)
-  min_fee_b : int64;        (** Constant fee *)
-  min_utxo_value : int64;   (** Minimum lovelace per output *)
-  max_tx_size : int;        (** Maximum transaction size in bytes *)
-  max_block_size : int;     (** Maximum block body size in bytes *)
+  min_fee_a : int64;
+  min_fee_b : int64;
+  min_utxo_value : int64;
+  max_tx_size : int;
+  max_block_size : int;
+  key_deposit : int64;
+  pool_deposit : int64;
 }
 
 let shelley_params = {
@@ -23,6 +25,8 @@ let shelley_params = {
   min_utxo_value = 1000000L;
   max_tx_size = 16384;
   max_block_size = 65536;
+  key_deposit = 2000000L;
+  pool_deposit = 500000000L;
 }
 
 (* ================================================================ *)
@@ -87,25 +91,25 @@ let apply_block t (block : Block_decoder.decoded_block) =
   let errors = ref [] in
   List.iteri (fun tx_idx tx_cbor ->
     match Tx_decoder.decode_transaction ~era:block.db_era tx_cbor with
-    | Error _e -> ()  (* decode failure — skip *)
+    | Error _e -> ()
     | Ok tx ->
       let errs = Utxo.validate_tx
         ~min_fee_a:t.params.min_fee_a
         ~min_fee_b:t.params.min_fee_b
         ~min_utxo_value:t.params.min_utxo_value
+        ~key_deposit:t.params.key_deposit
+        ~pool_deposit:t.params.pool_deposit
         ~utxo:t.utxo ~current_slot:slot tx in
-      if errs = [] then begin
-        let tx_hash = tx_hash_of_cbor tx_cbor in
-        Utxo.apply_tx t.utxo ~tx_hash tx;
-        t.tx_count <- t.tx_count + 1
-      end else begin
-        errors := { be_slot = slot; be_tx_index = tx_idx; be_errors = errs } :: !errors;
-        t.validation_errors <- t.validation_errors + List.length errs;
-        (* Apply anyway for now — real nodes would reject the block *)
-        let tx_hash = tx_hash_of_cbor tx_cbor in
-        Utxo.apply_tx t.utxo ~tx_hash tx;
-        t.tx_count <- t.tx_count + 1
-      end
+      (* Separate real errors from warnings *)
+      let real_errors = List.filter (fun e -> not (Utxo.is_warning e)) errs in
+      if real_errors <> [] then begin
+        errors := { be_slot = slot; be_tx_index = tx_idx; be_errors = real_errors } :: !errors;
+        t.validation_errors <- t.validation_errors + List.length real_errors
+      end;
+      (* Always apply (even with errors — we're syncing, not producing) *)
+      let tx_hash = tx_hash_of_cbor tx_cbor in
+      Utxo.apply_tx t.utxo ~tx_hash tx;
+      t.tx_count <- t.tx_count + 1
   ) block.db_tx_raw;
   t.slot <- slot;
   t.block_count <- t.block_count + 1;

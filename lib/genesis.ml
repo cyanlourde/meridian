@@ -78,6 +78,8 @@ let parse_shelley_genesis ~path =
         min_utxo_value = pp_int64 "minUTxOValue" 1000000L;
         max_tx_size = pp_int "maxTxSize" 16384;
         max_block_size = pp_int "maxBlockBodySize" 65536;
+        key_deposit = pp_int64 "keyDeposit" 2000000L;
+        pool_deposit = pp_int64 "poolDeposit" 500000000L;
       }
     | None -> Ledger_state.shelley_params in
   (* Initial funds *)
@@ -138,6 +140,8 @@ let preview_genesis = {
     min_utxo_value = 1000000L;
     max_tx_size = 16384;
     max_block_size = 65536;
+    key_deposit = 2000000L;
+    pool_deposit = 500000000L;
   };
   initial_funds = [];
 }

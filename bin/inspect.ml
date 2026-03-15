@@ -118,8 +118,8 @@ let () =
                  (if out.Tx_decoder.to_has_multi_asset then " +assets" else "")
                  (if out.Tx_decoder.to_has_datum then " +datum" else "")
              ) tx.dt_outputs;
-             if tx.dt_cert_count > 0 then
-               Printf.printf "  Certs:      %d\n%!" tx.dt_cert_count;
+             if tx.dt_certs <> [] then
+               Printf.printf "  Certs:      %d\n%!" (List.length tx.dt_certs);
              if tx.dt_mint then
                Printf.printf "  Mint:       yes\n%!")
 

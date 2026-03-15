@@ -114,7 +114,7 @@ let test_alonzo_datum () =
   | Ok tx ->
     let out = List.hd tx.dt_outputs in
     Alcotest.(check bool) "has datum" true out.to_has_datum;
-    Alcotest.(check int) "1 collateral" 1 tx.dt_collateral_count
+    Alcotest.(check int) "1 collateral" 1 (List.length tx.dt_collateral_inputs)
 
 (* ================================================================ *)
 (* Babbage map-based output                                          *)
@@ -159,8 +159,8 @@ let test_certs_withdrawals () =
   match Tx_decoder.decode_transaction ~era:Shelley tx_body with
   | Error e -> Alcotest.fail e
   | Ok tx ->
-    Alcotest.(check int) "1 cert" 1 tx.dt_cert_count;
-    Alcotest.(check int) "2 withdrawals" 2 tx.dt_withdrawal_count
+    Alcotest.(check int) "1 cert" 1 (List.length tx.dt_certs);
+    Alcotest.(check bool) "has withdrawal" true (tx.dt_withdrawal_total > 0L)
 
 (* ================================================================ *)
 (* Mint field (Mary+)                                                *)
