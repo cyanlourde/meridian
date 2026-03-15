@@ -19,6 +19,9 @@ type certificate = {
 }
 
 val preview_aggregator : string
+val preprod_aggregator : string
+val mainnet_aggregator : string
+val network_aggregator : string -> string
 
 val list_snapshots : ?aggregator:string -> unit ->
   (snapshot_summary list, string) result

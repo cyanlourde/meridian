@@ -29,6 +29,16 @@ type certificate = {
 
 let preview_aggregator =
   "https://aggregator.pre-release-preview.api.mithril.network/aggregator"
+let preprod_aggregator =
+  "https://aggregator.release-preprod.api.mithril.network/aggregator"
+let mainnet_aggregator =
+  "https://aggregator.release-mainnet.api.mithril.network/aggregator"
+
+let network_aggregator = function
+  | "preview" -> preview_aggregator
+  | "preprod" -> preprod_aggregator
+  | "mainnet" -> mainnet_aggregator
+  | _ -> preview_aggregator
 
 (* ================================================================ *)
 (* HTTP via curl                                                     *)

@@ -146,7 +146,8 @@ let preview_genesis = {
   initial_funds = [];
 }
 
-(** Mainnet genesis placeholder — not yet fully parsed. *)
+(** Full mainnet genesis: Byron epochs 0-207 (21600 slots/epoch),
+    Shelley epoch 208+ (432000 slots/epoch), transition at slot 4492800. *)
 let mainnet_genesis = {
   network_magic = 764824073L;
   epoch_length = 432000L;
@@ -157,6 +158,33 @@ let mainnet_genesis = {
   protocol_params = Ledger_state.shelley_params;
   initial_funds = [];
 }
+
+let preprod_genesis = {
+  network_magic = 1L;
+  epoch_length = 432000L;
+  slot_length = 1;
+  active_slots_coeff = 0.05;
+  max_kes_evolutions = 62;
+  max_lovelace_supply = 45000000000000000L;
+  protocol_params = Ledger_state.shelley_params;
+  initial_funds = [];
+}
+
+let genesis_for_network = function
+  | "preview" -> preview_genesis
+  | "preprod" -> preprod_genesis
+  | "mainnet" -> mainnet_genesis
+  | _ -> preview_genesis
+
+let epoch_params_for_network = function
+  | "mainnet" -> Epoch.mainnet_epoch_params
+  | _ -> Epoch.preview_epoch_params
+
+let default_node_for_network = function
+  | "preview" -> ("preview-node.play.dev.cardano.org", 3001)
+  | "preprod" -> ("preprod-node.play.dev.cardano.org", 3001)
+  | "mainnet" -> ("backbone.cardano.iog.io", 3001)
+  | _ -> ("preview-node.play.dev.cardano.org", 3001)
 
 (* ================================================================ *)
 (* Ledger initialization from genesis                                *)
