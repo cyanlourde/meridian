@@ -20,3 +20,6 @@ module Sync_pipeline = Sync_pipeline
 module Address = Address
 module Block_decoder = Block_decoder
 module Tx_decoder = Tx_decoder
+module Epoch = Epoch
+module Header_validation = Header_validation
+module Chain_validation = Chain_validation
