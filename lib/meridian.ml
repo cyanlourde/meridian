@@ -23,3 +23,4 @@ module Tx_decoder = Tx_decoder
 module Epoch = Epoch
 module Header_validation = Header_validation
 module Chain_validation = Chain_validation
+module Utxo = Utxo
