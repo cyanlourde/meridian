@@ -37,6 +37,7 @@ val mem : utxo_set -> TxIn.t -> bool
 val find : utxo_set -> TxIn.t -> TxOut.t option
 val add : utxo_set -> TxIn.t -> TxOut.t -> unit
 val remove : utxo_set -> TxIn.t -> unit
+val iter : (TxIn.t -> TxOut.t -> unit) -> utxo_set -> unit
 val total_lovelace : utxo_set -> int64
 
 (** {1 Transaction validation} *)

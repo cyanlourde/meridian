@@ -6,5 +6,6 @@
         test_consensus test_crypto test_network test_chain_sync_live
         test_keep_alive_live test_store test_sync_pipeline
         test_block_decoder test_tx_decoder
-        test_header_validation test_chain_validation test_utxo)
+        test_header_validation test_chain_validation test_utxo
+        test_ledger_state)
  (libraries meridian alcotest))

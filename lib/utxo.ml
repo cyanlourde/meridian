@@ -96,6 +96,10 @@ let remove s txin =
     s.size <- s.size - 1
   end
 
+(** Iterate over all entries. *)
+let iter f s =
+  TxInMap.iter (fun k v -> f k v) s.entries
+
 (** Total lovelace in the entire UTxO set. *)
 let total_lovelace s =
   TxInMap.fold (fun _k v acc -> Int64.add acc v.TxOut.lovelace) s.entries 0L
