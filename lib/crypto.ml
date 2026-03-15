@@ -186,9 +186,11 @@ external sodium_ed25519_keypair : unit -> bytes * bytes = "meridian_ed25519_keyp
 external sodium_ed25519_sign : bytes -> bytes -> bytes = "meridian_ed25519_sign"
 
 let libsodium_available = ref false
+let vrf_init_hook = ref (fun () -> ())
 
 let init () =
-  libsodium_available := sodium_init ()
+  libsodium_available := sodium_init ();
+  !vrf_init_hook ()
 
 (** Blake2b via libsodium (fast path). Falls back to pure OCaml. *)
 let blake2b_256_sodium data =
@@ -246,17 +248,49 @@ let ed25519_keypair () =
     with Failure msg -> Error msg
 
 (* ================================================================ *)
-(* VRF verification — stub (requires VRF extension not in standard   *)
-(* libsodium; Cardano uses a custom fork)                            *)
+(* ================================================================ *)
+(* VRF (Cardano libsodium fork)                                      *)
 (* ================================================================ *)
 
-let vrf_verify ~public_key:_ ~proof:_ ~message:_ =
-  Error "vrf_verify: not yet implemented (requires libsodium-vrf fork)"
+external sodium_vrf_available : unit -> bool = "meridian_vrf_available"
+external sodium_vrf_prove : bytes -> bytes -> bytes = "meridian_vrf_prove"
+external sodium_vrf_verify_raw : bytes -> bytes -> bytes -> bytes * bool = "meridian_vrf_verify"
+external sodium_vrf_proof_to_hash : bytes -> bytes = "meridian_vrf_proof_to_hash"
+
+let vrf_available = ref false
+
+let init_vrf () =
+  if !libsodium_available then
+    vrf_available := (try sodium_vrf_available () with _ -> false)
+
+let () = vrf_init_hook := init_vrf
+
+let vrf_prove ~secret_key ~message =
+  if not !vrf_available then
+    Error "VRF not available (need Cardano libsodium fork)"
+  else
+    try Ok (sodium_vrf_prove secret_key message)
+    with Failure msg -> Error msg
+
+let vrf_verify ~public_key ~proof ~message =
+  if not !vrf_available then
+    Error "VRF not available (need Cardano libsodium fork)"
+  else
+    try
+      let (output, valid) = sodium_vrf_verify_raw public_key proof message in
+      Ok (output, valid)
+    with Failure msg -> Error msg
+
+let vrf_proof_to_hash ~proof =
+  if not !vrf_available then
+    Error "VRF not available (need Cardano libsodium fork)"
+  else
+    try Ok (sodium_vrf_proof_to_hash proof)
+    with Failure msg -> Error msg
 
 (* ================================================================ *)
-(* KES verification — stub (Cardano-specific sum composition,        *)
-(* not in standard libsodium)                                        *)
+(* KES verification (uses OCaml Kes module, not C stub)              *)
 (* ================================================================ *)
 
 let kes_verify ~public_key:_ ~period:_ ~message:_ ~signature:_ =
-  Error "kes_verify: not yet implemented (requires KES library)"
+  Error "kes_verify: use Kes.verify instead"

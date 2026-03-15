@@ -24,17 +24,32 @@ typedef int (*ed25519_verify_fn)(const unsigned char *sig,
     const unsigned char *pk);
 typedef int (*ed25519_keypair_fn)(unsigned char *pk, unsigned char *sk);
 
+/* VRF function pointer types (Cardano libsodium fork) */
+typedef int (*vrf_prove_fn)(unsigned char *proof,
+    const unsigned char *sk, const unsigned char *m, unsigned long long mlen);
+typedef int (*vrf_verify_fn)(unsigned char *output,
+    const unsigned char *pk, const unsigned char *proof,
+    const unsigned char *m, unsigned long long mlen);
+typedef int (*vrf_proof_to_hash_fn)(unsigned char *hash,
+    const unsigned char *proof);
+typedef int (*vrf_keypair_fn)(unsigned char *pk, unsigned char *sk);
+
 /* Cached function pointers */
 static void *sodium_lib = NULL;
 static blake2b_fn fn_blake2b = NULL;
 static ed25519_verify_fn fn_ed25519_verify = NULL;
 static ed25519_sign_fn fn_ed25519_sign = NULL;
 static ed25519_keypair_fn fn_ed25519_keypair = NULL;
+static vrf_prove_fn fn_vrf_prove = NULL;
+static vrf_verify_fn fn_vrf_verify = NULL;
+static vrf_proof_to_hash_fn fn_vrf_proof_to_hash = NULL;
+static vrf_keypair_fn fn_vrf_keypair = NULL;
 
 static int load_sodium(void) {
     if (sodium_lib) return 1;
-    sodium_lib = dlopen("libsodium.so.23", RTLD_LAZY);
-    if (!sodium_lib) sodium_lib = dlopen("libsodium.so", RTLD_LAZY);
+    /* Try Cardano fork first (installed locally), then system */
+    sodium_lib = dlopen("libsodium.so", RTLD_LAZY);
+    if (!sodium_lib) sodium_lib = dlopen("libsodium.so.23", RTLD_LAZY);
     if (!sodium_lib) return 0;
 
     sodium_init_fn init = (sodium_init_fn)dlsym(sodium_lib, "sodium_init");
@@ -47,6 +62,19 @@ static int load_sodium(void) {
         "crypto_sign_ed25519_detached");
     fn_ed25519_keypair = (ed25519_keypair_fn)dlsym(sodium_lib,
         "crypto_sign_ed25519_keypair");
+
+    /* VRF (only in Cardano fork) */
+    fn_vrf_prove = (vrf_prove_fn)dlsym(sodium_lib,
+        "crypto_vrf_ietfdraft13_prove");
+    fn_vrf_verify = (vrf_verify_fn)dlsym(sodium_lib,
+        "crypto_vrf_ietfdraft13_verify");
+    fn_vrf_proof_to_hash = (vrf_proof_to_hash_fn)dlsym(sodium_lib,
+        "crypto_vrf_ietfdraft13_proof_to_hash");
+    fn_vrf_keypair = (vrf_keypair_fn)dlsym(sodium_lib,
+        "crypto_vrf_ietfdraft13_keypair_from_seed");
+    if (!fn_vrf_keypair)
+        fn_vrf_keypair = (vrf_keypair_fn)dlsym(sodium_lib,
+            "crypto_vrf_ietfdraft13_keypair");
     return 1;
 }
 
@@ -151,4 +179,79 @@ CAMLprim value meridian_ed25519_sign(value v_msg, value v_sk) {
         (const unsigned char *)Bytes_val(v_sk));
 
     CAMLreturn(v_sig);
+}
+
+/* ================================================================ */
+/* VRF (Cardano libsodium fork)                                      */
+/* ================================================================ */
+
+/* meridian_vrf_available : unit -> bool */
+CAMLprim value meridian_vrf_available(value unit) {
+    CAMLparam1(unit);
+    load_sodium();
+    CAMLreturn(Val_bool(fn_vrf_prove != NULL && fn_vrf_verify != NULL));
+}
+
+/* meridian_vrf_prove : bytes -> bytes -> bytes */
+CAMLprim value meridian_vrf_prove(value v_sk, value v_msg) {
+    CAMLparam2(v_sk, v_msg);
+    CAMLlocal1(v_proof);
+
+    if (!fn_vrf_prove)
+        caml_failwith("VRF not available (need Cardano libsodium fork)");
+    if (caml_string_length(v_sk) != 64)
+        caml_failwith("vrf_prove: secret key must be 64 bytes");
+
+    v_proof = caml_alloc_string(80);
+    int ret = fn_vrf_prove(
+        (unsigned char *)Bytes_val(v_proof),
+        (const unsigned char *)Bytes_val(v_sk),
+        (const unsigned char *)Bytes_val(v_msg),
+        caml_string_length(v_msg));
+
+    if (ret != 0)
+        caml_failwith("vrf_prove: proof generation failed");
+
+    CAMLreturn(v_proof);
+}
+
+/* meridian_vrf_verify : bytes -> bytes -> bytes -> (bool * bytes) */
+CAMLprim value meridian_vrf_verify(value v_pk, value v_proof, value v_msg) {
+    CAMLparam3(v_pk, v_proof, v_msg);
+    CAMLlocal3(v_output, v_valid, v_pair);
+
+    if (!fn_vrf_verify)
+        caml_failwith("VRF not available (need Cardano libsodium fork)");
+
+    v_output = caml_alloc_string(64);
+    int ret = fn_vrf_verify(
+        (unsigned char *)Bytes_val(v_output),
+        (const unsigned char *)Bytes_val(v_pk),
+        (const unsigned char *)Bytes_val(v_proof),
+        (const unsigned char *)Bytes_val(v_msg),
+        caml_string_length(v_msg));
+
+    v_pair = caml_alloc_tuple(2);
+    Store_field(v_pair, 0, v_output);
+    Store_field(v_pair, 1, Val_bool(ret == 0));
+    CAMLreturn(v_pair);
+}
+
+/* meridian_vrf_proof_to_hash : bytes -> bytes */
+CAMLprim value meridian_vrf_proof_to_hash(value v_proof) {
+    CAMLparam1(v_proof);
+    CAMLlocal1(v_hash);
+
+    if (!fn_vrf_proof_to_hash)
+        caml_failwith("VRF not available (need Cardano libsodium fork)");
+
+    v_hash = caml_alloc_string(64);
+    int ret = fn_vrf_proof_to_hash(
+        (unsigned char *)Bytes_val(v_hash),
+        (const unsigned char *)Bytes_val(v_proof));
+
+    if (ret != 0)
+        caml_failwith("vrf_proof_to_hash: failed");
+
+    CAMLreturn(v_hash);
 }

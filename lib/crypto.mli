@@ -42,13 +42,21 @@ val ed25519_sign :
 val ed25519_keypair : unit -> (bytes * bytes, string) result
 (** Returns [(public_key, secret_key)]. *)
 
-(** {1 VRF (stub)} *)
+(** {1 VRF (Cardano libsodium fork)} *)
+
+val vrf_available : bool ref
+
+val vrf_prove :
+  secret_key:bytes -> message:bytes -> (bytes, string) result
 
 val vrf_verify :
   public_key:bytes -> proof:bytes -> message:bytes ->
   (bytes * bool, string) result
 
-(** {1 KES (stub)} *)
+val vrf_proof_to_hash :
+  proof:bytes -> (bytes, string) result
+
+(** {1 KES} *)
 
 val kes_verify :
   public_key:bytes -> period:int -> message:bytes -> signature:bytes ->
