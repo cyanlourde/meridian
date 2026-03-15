@@ -100,8 +100,8 @@ let handle_state_query_msg ctx query_cbor =
     let utxo = Ledger_state.utxo ctx.ledger in
     let inputs = List.filter_map (fun cbor ->
       match cbor with
-      | Cbor.Array [Cbor.Bytes hash; Cbor.Uint idx] ->
-        Some Utxo.TxIn.{ tx_hash = hash; tx_index = Int64.to_int idx }
+      | Cbor.Array [Cbor.Bytes h; Cbor.Uint idx] ->
+        Some Utxo.TxIn.{ tx_hash = h; tx_index = Int64.to_int idx }
       | _ -> None
     ) txins in
     let results = List.filter_map (fun (txin, opt) ->

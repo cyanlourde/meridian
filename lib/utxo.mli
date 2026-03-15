@@ -9,6 +9,7 @@ module TxIn : sig
   type t = { tx_hash : bytes; tx_index : int }
   val compare : t -> t -> int
   val equal : t -> t -> bool
+  val hash : t -> int
   val of_decoder : Tx_decoder.tx_input -> t
   val to_string : t -> string
 end

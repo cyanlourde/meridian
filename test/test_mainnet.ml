@@ -118,11 +118,11 @@ let test_large_utxo_snapshot () =
   let utxo = Ledger_state.utxo ls in
   let n = 10000 in  (* 10K entries as a reasonable test *)
   for i = 0 to n - 1 do
-    let hash = Bytes.make 32 '\x00' in
-    Bytes.set_uint8 hash 0 (i land 0xFF);
-    Bytes.set_uint8 hash 1 ((i lsr 8) land 0xFF);
+    let h = Bytes.make 32 '\x00' in
+    Bytes.set_uint8 h 0 (i land 0xFF);
+    Bytes.set_uint8 h 1 ((i lsr 8) land 0xFF);
     Utxo.add utxo
-      Utxo.TxIn.{ tx_hash = hash; tx_index = 0 }
+      Utxo.TxIn.{ tx_hash = h; tx_index = 0 }
       Utxo.TxOut.{ address = Bytes.make 29 '\x61';
                    value = Multi_asset.of_lovelace (Int64.of_int ((i+1) * 1000000));
                    has_datum = false; has_script_ref = false }

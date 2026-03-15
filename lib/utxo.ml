@@ -6,7 +6,10 @@
      consumed + mint = produced
    Where:
      consumed = sum(input_values) + withdrawals_value + refund_value
-     produced = sum(output_values) + fee_value + deposit_value *)
+     produced = sum(output_values) + fee_value + deposit_value
+
+   Performance: Hashtbl-based for O(1) amortized lookups.
+   Incremental lovelace tracking on add/remove. *)
 
 module TxIn = struct
   type t = { tx_hash : bytes; tx_index : int }
@@ -18,7 +21,15 @@ module TxIn = struct
   let of_decoder (inp : Tx_decoder.tx_input) =
     { tx_hash = inp.ti_tx_hash; tx_index = Int64.to_int inp.ti_index }
 
-  let equal a b = compare a b = 0
+  let equal a b = Bytes.equal a.tx_hash b.tx_hash && a.tx_index = b.tx_index
+
+  let hash t =
+    (* Fast hash: combine first 8 bytes of tx_hash with tx_index *)
+    let h = ref 0 in
+    for i = 0 to min 7 (Bytes.length t.tx_hash - 1) do
+      h := !h * 31 + Bytes.get_uint8 t.tx_hash i
+    done;
+    !h lxor (t.tx_index * 65537)
 
   let to_string t =
     let hex = Buffer.create 16 in
@@ -41,46 +52,64 @@ module TxOut = struct
       has_datum = out.to_has_datum; has_script_ref = out.to_has_script_ref }
 end
 
-module TxInMap = Map.Make(TxIn)
+(* Hashtbl with custom hash/equal for TxIn *)
+module TxInHash = Hashtbl.Make(struct
+  type t = TxIn.t
+  let equal = TxIn.equal
+  let hash = TxIn.hash
+end)
 
 type utxo_set = {
-  mutable entries : TxOut.t TxInMap.t;
+  entries : TxOut.t TxInHash.t;
   mutable size : int;
+  mutable total_lovelace_cache : int64;
 }
 
-let create () = { entries = TxInMap.empty; size = 0 }
+let create () = {
+  entries = TxInHash.create 500_000;
+  size = 0;
+  total_lovelace_cache = 0L;
+}
+
 let size s = s.size
-let mem s txin = TxInMap.mem txin s.entries
-let find s txin = TxInMap.find_opt txin s.entries
+
+let mem s txin = TxInHash.mem s.entries txin
+
+let find s txin = TxInHash.find_opt s.entries txin
 
 let add s txin txout =
-  if not (TxInMap.mem txin s.entries) then s.size <- s.size + 1;
-  s.entries <- TxInMap.add txin txout s.entries
+  (match TxInHash.find_opt s.entries txin with
+   | Some old ->
+     s.total_lovelace_cache <- Int64.sub s.total_lovelace_cache
+       (Multi_asset.lovelace_of old.TxOut.value)
+   | None -> s.size <- s.size + 1);
+  TxInHash.replace s.entries txin txout;
+  s.total_lovelace_cache <- Int64.add s.total_lovelace_cache
+    (Multi_asset.lovelace_of txout.value)
 
 let remove s txin =
-  if TxInMap.mem txin s.entries then begin
-    s.entries <- TxInMap.remove txin s.entries;
-    s.size <- s.size - 1
-  end
+  match TxInHash.find_opt s.entries txin with
+  | Some old ->
+    TxInHash.remove s.entries txin;
+    s.size <- s.size - 1;
+    s.total_lovelace_cache <- Int64.sub s.total_lovelace_cache
+      (Multi_asset.lovelace_of old.TxOut.value)
+  | None -> ()
 
-let iter f s = TxInMap.iter (fun k v -> f k v) s.entries
+let iter f s = TxInHash.iter (fun k v -> f k v) s.entries
 
-(** Find all UTXOs at a given address. O(n) scan. *)
 let find_by_address s ~address =
-  TxInMap.fold (fun k v acc ->
+  TxInHash.fold (fun k v acc ->
     if Bytes.equal v.TxOut.address address then (k, v) :: acc else acc
   ) s.entries []
 
-(** Look up specific TxIns. O(log n) per lookup. *)
 let find_by_txins s txins =
-  List.map (fun txin -> (txin, TxInMap.find_opt txin s.entries)) txins
+  List.map (fun txin -> (txin, TxInHash.find_opt s.entries txin)) txins
 
-let total_lovelace s =
-  TxInMap.fold (fun _k v acc ->
-    Int64.add acc (Multi_asset.lovelace_of v.TxOut.value)) s.entries 0L
+let total_lovelace s = s.total_lovelace_cache
 
 let total_assets s =
-  TxInMap.fold (fun _k v acc ->
+  TxInHash.fold (fun _k v acc ->
     acc + Multi_asset.asset_count v.TxOut.value) s.entries 0
 
 (* ================================================================ *)
@@ -152,7 +181,6 @@ let validate_tx ?(min_fee_a = 44L) ?(min_fee_b = 155381L)
   let add e = errors := e :: !errors in
 
   if not tx.dt_is_valid then begin
-    (* Failed Plutus: validate collateral only *)
     List.iter (fun (inp : Tx_decoder.tx_input) ->
       let txin = TxIn.of_decoder inp in
       if not (mem utxo txin) then add (Input_not_in_utxo txin)
@@ -162,7 +190,6 @@ let validate_tx ?(min_fee_a = 44L) ?(min_fee_b = 155381L)
     if tx.dt_inputs = [] then add Empty_inputs;
     if tx.dt_outputs = [] then add Empty_outputs;
 
-    (* Check inputs exist and sum consumed value (full multi-asset) *)
     let seen = Hashtbl.create (List.length tx.dt_inputs) in
     let consumed_value = ref Multi_asset.zero in
     List.iter (fun (inp : Tx_decoder.tx_input) ->
@@ -177,12 +204,10 @@ let validate_tx ?(min_fee_a = 44L) ?(min_fee_b = 155381L)
       end
     ) tx.dt_inputs;
 
-    (* Fee minimum *)
     let required_fee = min_fee ~min_fee_a ~min_fee_b ~tx_size:tx_size_estimate in
     if tx.dt_fee < required_fee then
       add (Insufficient_fee { required = required_fee; actual = tx.dt_fee });
 
-    (* Output minimums (lovelace component) *)
     List.iteri (fun i (out : Tx_decoder.tx_output) ->
       if Multi_asset.lovelace_of out.to_value < min_utxo_value then
         add (Output_too_small { index = i;
@@ -190,16 +215,11 @@ let validate_tx ?(min_fee_a = 44L) ?(min_fee_b = 155381L)
                minimum = min_utxo_value })
     ) tx.dt_outputs;
 
-    (* TTL *)
     (match tx.dt_ttl with
      | Some ttl when Int64.compare current_slot ttl > 0 ->
        add (Expired_ttl { slot = current_slot; ttl })
      | _ -> ());
 
-    (* Value conservation (full multi-asset):
-       consumed + mint = produced
-       where consumed includes withdrawal and refund lovelace,
-       produced includes fee and deposit lovelace *)
     let (deposits, refunds) = compute_deposits ~key_deposit ~pool_deposit tx.dt_certs in
     let consumed_with_extras = Multi_asset.add !consumed_value
       (Multi_asset.of_lovelace (Int64.add tx.dt_withdrawal_total refunds)) in
