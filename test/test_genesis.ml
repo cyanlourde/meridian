@@ -206,6 +206,7 @@ let test_apply_after_genesis () =
     };
     db_tx_count = 1; db_tx_raw = [tx_cbor];
     db_raw_cbor = Cbor.Null;
+    db_invalid_tx_indices = [];
   } in
   let errors = Ledger_state.apply_block ls block in
   (* Should have no "input not in utxo" errors *)

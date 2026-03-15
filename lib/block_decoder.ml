@@ -46,6 +46,8 @@ type decoded_block = {
   db_tx_count : int;
   db_tx_raw : Cbor.cbor_value list;
   db_raw_cbor : Cbor.cbor_value;
+  db_invalid_tx_indices : int list;
+  (** Alonzo+: indices of transactions where Plutus scripts failed *)
 }
 
 let era_of_tag = function
@@ -187,6 +189,17 @@ let extract_tx_bodies block_cbor =
   | Cbor.Array (_ :: Cbor.Array tx_bodies :: _) -> tx_bodies
   | _ -> []
 
+(** Extract invalid transaction indices from Alonzo+ blocks.
+    Block element 4 is [* transaction_index] listing failed Plutus txs. *)
+let extract_invalid_indices block_cbor =
+  match block_cbor with
+  | Cbor.Array (_ :: _ :: _ :: _ :: Cbor.Array indices :: _) ->
+    List.filter_map (function
+      | Cbor.Uint n -> Some (Int64.to_int n)
+      | _ -> None
+    ) indices
+  | _ -> []
+
 let extract_byron_txs _block_cbor = []
 
 (* ================================================================ *)
@@ -219,14 +232,19 @@ let decode_block cbor_bytes =
       | Byron -> extract_byron_txs block_cbor
       | _ -> extract_tx_bodies block_cbor
     in
+    let invalid_indices = match era with
+      | Alonzo | Babbage | Conway -> extract_invalid_indices block_cbor
+      | _ -> []
+    in
     Ok { db_era = era; db_header = header;
          db_tx_count = List.length tx_raw;
-         db_tx_raw = tx_raw; db_raw_cbor = block_cbor }
+         db_tx_raw = tx_raw; db_raw_cbor = block_cbor;
+         db_invalid_tx_indices = invalid_indices }
   | Cbor.Array (_ :: _) ->
     let* header = decode_byron_header unwrapped in
     Ok { db_era = Byron; db_header = header;
          db_tx_count = 0; db_tx_raw = [];
-         db_raw_cbor = unwrapped }
+         db_raw_cbor = unwrapped; db_invalid_tx_indices = [] }
   | _ -> Error "block: expected [era, block] array"
 
 let decode_block_header cbor_bytes =

@@ -93,11 +93,15 @@ let tx_hash_of_cbor cbor =
 let apply_block t (block : Block_decoder.decoded_block) =
   let slot = block.db_header.bh_slot in
   let errors = ref [] in
+  let invalid_set = block.db_invalid_tx_indices in
   List.iteri (fun tx_idx tx_cbor ->
-    match Tx_decoder.decode_transaction ~era:block.db_era tx_cbor with
-    | Error _e -> ()
+    match (try Tx_decoder.decode_transaction ~era:block.db_era tx_cbor
+           with _ -> Error "decode exception") with
+    | Error _e -> ()  (* skip malformed tx *)
     | Ok tx ->
-      (* Skip validation in bootstrap region (genesis delegation UTXOs) *)
+      (* Set is_valid from block's invalid tx list (Alonzo+) *)
+      let tx = if List.mem tx_idx invalid_set then
+        { tx with Tx_decoder.dt_is_valid = false } else tx in
       if Int64.compare slot t.skip_validation_before_slot >= 0 then begin
         let errs = Utxo.validate_tx
           ~min_fee_a:t.params.min_fee_a
@@ -111,7 +115,6 @@ let apply_block t (block : Block_decoder.decoded_block) =
           t.validation_errors <- t.validation_errors + List.length errs
         end
       end;
-      (* Always apply (even with errors — we're syncing, not producing) *)
       let tx_hash = tx_hash_of_cbor tx_cbor in
       Utxo.apply_tx t.utxo ~tx_hash tx;
       t.tx_count <- t.tx_count + 1

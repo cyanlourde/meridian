@@ -29,6 +29,7 @@ type decoded_block = {
   db_tx_count : int;
   db_tx_raw : Cbor.cbor_value list;
   db_raw_cbor : Cbor.cbor_value;
+  db_invalid_tx_indices : int list;
 }
 
 val era_name : era -> string

@@ -65,6 +65,7 @@ let test_validation_ordering () =
     db_era = Shelley; db_header = header;
     db_tx_count = 0; db_tx_raw = [];
     db_raw_cbor = Cbor.Null;
+    db_invalid_tx_indices = [];
   } in
   (* Crypto should succeed (no opcert to check, sizes OK) *)
   (match Block_validator.validate_block_crypto block with
@@ -173,6 +174,7 @@ let test_byron_crypto_skip () =
     };
     db_tx_count = 0; db_tx_raw = [];
     db_raw_cbor = Cbor.Null;
+    db_invalid_tx_indices = [];
   } in
   match Block_validator.validate_block_crypto block with
   | Ok () -> ()
@@ -197,6 +199,7 @@ let test_empty_block_all_layers () =
     db_era = Babbage; db_header = header;
     db_tx_count = 0; db_tx_raw = [];
     db_raw_cbor = Cbor.Null;
+    db_invalid_tx_indices = [];
   } in
   (* Crypto OK *)
   (match Block_validator.validate_block_crypto block with

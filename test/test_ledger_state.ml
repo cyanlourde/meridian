@@ -39,6 +39,7 @@ let make_block ?(slot = 100L) ?(block_no = 1L) tx_bodies =
     db_tx_count = List.length tx_bodies;
     db_tx_raw = tx_bodies;
     db_raw_cbor = Cbor.Null;
+    db_invalid_tx_indices = [];
   }
 
 (** Build a CBOR tx body map. *)
