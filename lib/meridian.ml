@@ -26,3 +26,5 @@ module Chain_validation = Chain_validation
 module Utxo = Utxo
 module Ledger_state = Ledger_state
 module Block_validator = Block_validator
+module Json = Json
+module Genesis = Genesis
