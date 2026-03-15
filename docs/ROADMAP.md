@@ -18,30 +18,38 @@
 - [x] State-query mini-protocol (node-to-client)
 - [x] Tx-submission mini-protocol (node-to-client)
 - [x] Tx-monitor mini-protocol (node-to-client)
+- [x] TCP connection layer with DNS, timeouts, reconnection
+- [x] Per-protocol segment reassembly (Proto_buffer)
+- [x] Concurrent keep-alive auto-responder
+- [x] Unified sync pipeline (chain-sync + block-fetch + storage)
 
 ## Phase 3 — Consensus (Weeks 8-16)
 - [x] Ouroboros Praos chain selection
-- [x] VRF verification (libsodium bindings) — stub, awaiting system libsodium-dev
+- [x] VRF verification — stub, awaiting Cardano-specific libsodium fork
 - [x] KES signature verification — stub, awaiting KES library
 - [x] Slot leader check
 - [x] Epoch transition logic
+- [x] Epoch arithmetic with Byron→Shelley transition
 
 ## Phase 4 — Ledger (Weeks 6-24)
+- [x] Transaction validation (UTXO rules per Shelley formal spec)
+- [x] Block header validation (slot ordering, prev_hash, body hash, sizes)
+- [x] UTXO set management (functional map, add/remove/find)
+- [x] Value conservation (inputs + withdrawals + refunds = outputs + fee + deposits)
+- [x] Certificate deposit/refund tracking (stake reg/dereg, pool reg/retirement)
+- [x] Failed Plutus transaction handling (is_valid=false, collateral)
+- [x] Block crypto validation (opcert Ed25519 via libsodium)
+- [x] Genesis configuration parsing and UTXO bootstrapping
+- [ ] Full multi-asset UTXO tracking (currently lovelace-only with multi-asset warnings)
+- [ ] Plutus script cost model validation
+- [ ] Complete Conway-era governance ledger rules
 - [ ] Byron era ledger rules
-- [ ] Shelley era ledger rules
-- [ ] Allegra era ledger rules
-- [ ] Mary era ledger rules
-- [ ] Alonzo era ledger rules (Plutus)
-- [ ] Babbage era ledger rules
-- [ ] Conway era ledger rules (governance)
-- [ ] Transaction validation
-- [ ] Block validation
-- [ ] UTXO set management
 
 ## Phase 5 — Storage & Recovery (Weeks 16-28)
-- [ ] On-disk chain storage (immutable + volatile DB)
-- [ ] UTXO state snapshots
-- [ ] Crash recovery (fsync discipline)
+- [x] On-disk chain storage (content-addressed, append-only index)
+- [x] UTXO state snapshots (crash-safe binary format)
+- [x] Crash recovery (atomic writes, snapshot restore)
+- [x] Resumable sync (chain intersection points from stored data)
 - [ ] Mithril snapshot import
 
 ## Phase 6 — Block Production (Weeks 24-32)
@@ -52,7 +60,9 @@
 - [ ] Mempool management
 
 ## Phase 7 — Integration (Weeks 28-36)
-- [ ] Sync from genesis to tip
+- [x] Sync from genesis (preview testnet, 2950+ blocks validated)
+- [x] Real network handshake and protocol negotiation
+- [ ] Full genesis-to-tip sync (millions of blocks)
 - [ ] Private testnet with Haskell nodes
 - [ ] Preview/preprod block production
 - [ ] 10-day stability run
