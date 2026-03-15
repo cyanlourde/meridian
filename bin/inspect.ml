@@ -114,13 +114,13 @@ let () =
                let addr_info = match Address.decode_address out.Tx_decoder.to_address with
                  | Ok a -> Address.addr_type_name a.addr_type
                  | Error _ -> "?" in
-               Printf.printf "    [%d] %Ld lovelace (%s)%s%s\n%!" i out.Tx_decoder.to_lovelace addr_info
-                 (if out.Tx_decoder.to_has_multi_asset then " +assets" else "")
+               Printf.printf "    [%d] %Ld lovelace (%s)%s%s\n%!" i (Multi_asset.lovelace_of out.Tx_decoder.to_value) addr_info
+                 (if not (Multi_asset.is_lovelace_only out.Tx_decoder.to_value) then " +assets" else "")
                  (if out.Tx_decoder.to_has_datum then " +datum" else "")
              ) tx.dt_outputs;
              if tx.dt_certs <> [] then
                Printf.printf "  Certs:      %d\n%!" (List.length tx.dt_certs);
-             if tx.dt_mint then
+             if Multi_asset.asset_count tx.dt_mint > 0 then
                Printf.printf "  Mint:       yes\n%!")
 
   | _ ->

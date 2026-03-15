@@ -114,9 +114,9 @@ let genesis_utxos genesis =
     let tx_hash = Crypto.blake2b_256 addr_bytes in
     let txin = Utxo.TxIn.{ tx_hash; tx_index = 0 } in
     let txout = Utxo.TxOut.{
-      address = addr_bytes; lovelace;
-      has_multi_asset = false; has_datum = false;
-      has_script_ref = false
+      address = addr_bytes;
+      value = Multi_asset.of_lovelace lovelace;
+      has_datum = false; has_script_ref = false
     } in
     (txin, txout)
   ) genesis.initial_funds

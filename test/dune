@@ -8,5 +8,6 @@
         test_block_decoder test_tx_decoder
         test_header_validation test_chain_validation test_utxo
         test_ledger_state test_crypto_real test_block_validator
-        test_integration test_genesis test_conservation)
+        test_integration test_genesis test_conservation
+        test_multi_asset)
  (libraries meridian alcotest))

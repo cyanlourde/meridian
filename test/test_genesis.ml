@@ -131,7 +131,7 @@ let test_genesis_utxos () =
     let (txin, txout) = List.hd utxos in
     Alcotest.(check int) "tx_hash 32 bytes" 32 (Bytes.length txin.Utxo.TxIn.tx_hash);
     Alcotest.(check int) "tx_index 0" 0 txin.tx_index;
-    Alcotest.(check int64) "lovelace" 5000000L txout.Utxo.TxOut.lovelace;
+    Alcotest.(check int64) "lovelace" 5000000L (Multi_asset.lovelace_of txout.Utxo.TxOut.value);
     rm_rf dir
 
 let test_genesis_tx_hash_deterministic () =

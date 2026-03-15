@@ -36,7 +36,7 @@ let test_shelley_tx () =
     Alcotest.(check bool) "has ttl" true (tx.dt_ttl <> None);
     Alcotest.(check int64) "ttl value" 50000000L (Option.get tx.dt_ttl);
     let out0 = List.hd tx.dt_outputs in
-    Alcotest.(check int64) "output 0 lovelace" 2000000L out0.to_lovelace;
+    Alcotest.(check int64) "output 0 lovelace" 2000000L (Multi_asset.lovelace_of out0.to_value);
     Alcotest.(check int) "output 0 addr len" 29 (Bytes.length out0.to_address)
 
 (* ================================================================ *)
@@ -69,7 +69,7 @@ let test_output_address () =
   | Ok tx ->
     let out = List.hd tx.dt_outputs in
     Alcotest.(check bool) "addr non-empty" true (Bytes.length out.to_address > 0);
-    Alcotest.(check bool) "lovelace > 0" true (out.to_lovelace > 0L)
+    Alcotest.(check bool) "lovelace > 0" true ((Multi_asset.lovelace_of out.to_value) > 0L)
 
 (* ================================================================ *)
 (* Mary multi-asset output                                           *)
@@ -92,8 +92,8 @@ let test_mary_multi_asset () =
   | Error e -> Alcotest.fail e
   | Ok tx ->
     let out = List.hd tx.dt_outputs in
-    Alcotest.(check bool) "has multi-asset" true out.to_has_multi_asset;
-    Alcotest.(check int64) "lovelace" 2000000L out.to_lovelace
+    Alcotest.(check bool) "has multi-asset" true (not (Multi_asset.is_lovelace_only out.to_value));
+    Alcotest.(check int64) "lovelace" 2000000L (Multi_asset.lovelace_of out.to_value)
 
 (* ================================================================ *)
 (* Alonzo with datum hash                                            *)
@@ -137,7 +137,7 @@ let test_babbage_output () =
   | Error e -> Alcotest.fail e
   | Ok tx ->
     let out = List.hd tx.dt_outputs in
-    Alcotest.(check int64) "lovelace" 5000000L out.to_lovelace;
+    Alcotest.(check int64) "lovelace" 5000000L (Multi_asset.lovelace_of out.to_value);
     Alcotest.(check bool) "has datum" true out.to_has_datum;
     Alcotest.(check bool) "has script ref" true out.to_has_script_ref
 
@@ -177,7 +177,7 @@ let test_mint () =
   match Tx_decoder.decode_transaction ~era:Mary tx_body with
   | Error e -> Alcotest.fail e
   | Ok tx ->
-    Alcotest.(check bool) "has mint" true tx.dt_mint
+    Alcotest.(check bool) "has mint" true (Multi_asset.asset_count tx.dt_mint > 0)
 
 (* ================================================================ *)
 (* Address decode integration                                        *)

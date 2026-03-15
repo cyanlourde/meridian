@@ -15,23 +15,21 @@ let make_txin tx_n idx =
   Utxo.TxIn.{ tx_hash = make_hash tx_n; tx_index = idx }
 
 let make_txout ?(lovelace = 2000000L) () =
-  Utxo.TxOut.{ address = make_addr (); lovelace;
-               has_multi_asset = false; has_datum = false;
-               has_script_ref = false }
+  Utxo.TxOut.{ address = make_addr (); value = Multi_asset.of_lovelace lovelace;
+               has_datum = false; has_script_ref = false }
 
 let make_input tx_n idx : Tx_decoder.tx_input =
   { ti_tx_hash = make_hash tx_n; ti_index = Int64.of_int idx }
 
 let make_output ?(lovelace = 2000000L) () : Tx_decoder.tx_output =
-  { to_address = make_addr (); to_lovelace = lovelace;
-    to_has_multi_asset = false; to_has_datum = false;
-    to_has_script_ref = false }
+  { to_address = make_addr (); to_value = Multi_asset.of_lovelace lovelace;
+    to_has_datum = false; to_has_script_ref = false }
 
 let make_tx ?(fee = 200000L) ?(ttl = None) inputs outputs : Tx_decoder.decoded_tx =
   { dt_inputs = inputs; dt_outputs = outputs; dt_fee = fee;
     dt_ttl = ttl; dt_validity_start = None;
     dt_certs = []; dt_withdrawal_total = 0L;
-    dt_mint = false; dt_collateral_inputs = [];
+    dt_mint = Multi_asset.zero; dt_collateral_inputs = [];
     dt_collateral_return = None; dt_total_collateral = None;
     dt_is_valid = true;
     dt_era = Block_decoder.Shelley }
@@ -55,7 +53,7 @@ let test_add_and_find () =
   Alcotest.(check int) "size 1" 1 (Utxo.size utxo);
   Alcotest.(check bool) "found" true (Utxo.mem utxo txin);
   (match Utxo.find utxo txin with
-   | Some out -> Alcotest.(check int64) "lovelace" 5000000L out.lovelace
+   | Some out -> Alcotest.(check int64) "lovelace" 5000000L (Multi_asset.lovelace_of out.value)
    | None -> Alcotest.fail "expected to find output")
 
 let test_remove () =

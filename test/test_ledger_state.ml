@@ -77,9 +77,8 @@ let test_apply_single_block () =
   let utxo = Ledger_state.utxo ls in
   Utxo.add utxo
     Utxo.TxIn.{ tx_hash = make_hash 0; tx_index = 0 }
-    Utxo.TxOut.{ address = make_addr (); lovelace = 10000000L;
-                 has_multi_asset = false; has_datum = false;
-                 has_script_ref = false };
+    Utxo.TxOut.{ address = make_addr (); value = Multi_asset.of_lovelace 10000000L;
+                 has_datum = false; has_script_ref = false };
   Alcotest.(check int) "seeded utxo" 1 (Utxo.size utxo);
   (* Block with 1 tx: spend genesis, produce 2 outputs *)
   let tx = make_tx_cbor ~inputs:[(0, 0)] ~outputs:[6000000L; 3800000L] ~fee:200000L in
@@ -105,9 +104,8 @@ let test_apply_chain () =
   (* Genesis: 10 ADA *)
   Utxo.add utxo
     Utxo.TxIn.{ tx_hash = make_hash 0; tx_index = 0 }
-    Utxo.TxOut.{ address = make_addr (); lovelace = 10000000L;
-                 has_multi_asset = false; has_datum = false;
-                 has_script_ref = false };
+    Utxo.TxOut.{ address = make_addr (); value = Multi_asset.of_lovelace 10000000L;
+                 has_datum = false; has_script_ref = false };
   (* Block 1: split genesis into 2 outputs *)
   let tx1 = make_tx_cbor ~inputs:[(0, 0)] ~outputs:[6000000L; 3800000L] ~fee:200000L in
   let _ = Ledger_state.apply_block ls (make_block ~slot:100L ~block_no:1L [tx1]) in
@@ -138,9 +136,8 @@ let test_invalid_tx () =
   let utxo = Ledger_state.utxo ls in
   Utxo.add utxo
     Utxo.TxIn.{ tx_hash = make_hash 0; tx_index = 0 }
-    Utxo.TxOut.{ address = make_addr (); lovelace = 5000000L;
-                 has_multi_asset = false; has_datum = false;
-                 has_script_ref = false };
+    Utxo.TxOut.{ address = make_addr (); value = Multi_asset.of_lovelace 5000000L;
+                 has_datum = false; has_script_ref = false };
   (* Tx that references a non-existent input *)
   let bad_tx = make_tx_cbor ~inputs:[(99, 0)] ~outputs:[4800000L] ~fee:200000L in
   (* Valid tx that spends genesis *)
@@ -181,9 +178,8 @@ let test_snapshot_restore () =
   for i = 0 to 4 do
     Utxo.add utxo
       Utxo.TxIn.{ tx_hash = make_hash i; tx_index = 0 }
-      Utxo.TxOut.{ address = make_addr (); lovelace = Int64.of_int ((i + 1) * 1000000);
-                   has_multi_asset = (i = 2); has_datum = (i = 3);
-                   has_script_ref = (i = 4) }
+      Utxo.TxOut.{ address = make_addr (); value = Multi_asset.of_lovelace (Int64.of_int ((i + 1) * 1000000));
+                   has_datum = (i = 3); has_script_ref = (i = 4) }
   done;
   (* Apply a block to advance slot *)
   let _ = Ledger_state.apply_block ls (make_block ~slot:500L ~block_no:5L []) in
@@ -230,9 +226,8 @@ let test_utxo_stats () =
   let utxo = Ledger_state.utxo ls in
   Utxo.add utxo
     Utxo.TxIn.{ tx_hash = make_hash 0; tx_index = 0 }
-    Utxo.TxOut.{ address = make_addr (); lovelace = 5000000L;
-                 has_multi_asset = false; has_datum = false;
-                 has_script_ref = false };
+    Utxo.TxOut.{ address = make_addr (); value = Multi_asset.of_lovelace 5000000L;
+                 has_datum = false; has_script_ref = false };
   let stats = Ledger_state.utxo_stats ls in
   Alcotest.(check int) "count" 1 stats.us_count;
   Alcotest.(check int64) "total" 5000000L stats.us_total_lovelace

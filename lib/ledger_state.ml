@@ -106,10 +106,9 @@ let apply_block t (block : Block_decoder.decoded_block) =
           ~key_deposit:t.params.key_deposit
           ~pool_deposit:t.params.pool_deposit
           ~utxo:t.utxo ~current_slot:slot tx in
-        let real_errors = List.filter (fun e -> not (Utxo.is_warning e)) errs in
-        if real_errors <> [] then begin
-          errors := { be_slot = slot; be_tx_index = tx_idx; be_errors = real_errors } :: !errors;
-          t.validation_errors <- t.validation_errors + List.length real_errors
+        if errs <> [] then begin
+          errors := { be_slot = slot; be_tx_index = tx_idx; be_errors = errs } :: !errors;
+          t.validation_errors <- t.validation_errors + List.length errs
         end
       end;
       (* Always apply (even with errors — we're syncing, not producing) *)
@@ -204,12 +203,12 @@ let snapshot t ~path =
     let entry = Bytes.create (32 + 4 + 8 + 2 + Bytes.length txout.Utxo.TxOut.address + 1) in
     Bytes.blit txin.Utxo.TxIn.tx_hash 0 entry 0 32;
     write_be32 entry 32 txin.tx_index;
-    write_be64 entry 36 txout.lovelace;
+    write_be64 entry 36 (Multi_asset.lovelace_of txout.value);
     let alen = Bytes.length txout.address in
     write_be16 entry 44 alen;
     Bytes.blit txout.address 0 entry 46 alen;
     let flags =
-      (if txout.has_multi_asset then 1 else 0) lor
+      (if not (Multi_asset.is_lovelace_only txout.value) then 1 else 0) lor
       (if txout.has_datum then 2 else 0) lor
       (if txout.has_script_ref then 4 else 0) in
     Bytes.set_uint8 entry (46 + alen) flags;
@@ -272,8 +271,9 @@ let restore ~path =
             Bytes.get_uint8 data (!off + 46 + alen) else 0 in
           let txin = Utxo.TxIn.{ tx_hash; tx_index } in
           let txout = Utxo.TxOut.{
-            address; lovelace;
-            has_multi_asset = flags land 1 <> 0;
+            address;
+            value = Multi_asset.of_lovelace lovelace;
+            (* Multi-asset data not persisted in snapshot v1 *)
             has_datum = flags land 2 <> 0;
             has_script_ref = flags land 4 <> 0;
           } in

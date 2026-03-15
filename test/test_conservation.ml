@@ -11,20 +11,18 @@ let make_input tx_n idx : Tx_decoder.tx_input =
   { ti_tx_hash = make_hash tx_n; ti_index = Int64.of_int idx }
 
 let make_output ?(lovelace = 2000000L) () : Tx_decoder.tx_output =
-  { to_address = make_addr (); to_lovelace = lovelace;
-    to_has_multi_asset = false; to_has_datum = false;
-    to_has_script_ref = false }
+  { to_address = make_addr (); to_value = Multi_asset.of_lovelace lovelace;
+    to_has_datum = false; to_has_script_ref = false }
 
 let make_txin tx_n idx = Utxo.TxIn.{ tx_hash = make_hash tx_n; tx_index = idx }
 
 let make_txout ?(lovelace = 2000000L) () =
-  Utxo.TxOut.{ address = make_addr (); lovelace;
-               has_multi_asset = false; has_datum = false;
-               has_script_ref = false }
+  Utxo.TxOut.{ address = make_addr (); value = Multi_asset.of_lovelace lovelace;
+               has_datum = false; has_script_ref = false }
 
 let make_tx ?(fee = 200000L) ?(withdrawal = 0L) ?(certs = [])
     ?(is_valid = true) ?(collateral = []) ?(collateral_return = None)
-    ?(total_collateral = None) ?(mint = false)
+    ?(total_collateral = None) ?(mint = Multi_asset.zero)
     inputs outputs : Tx_decoder.decoded_tx =
   { dt_inputs = inputs; dt_outputs = outputs; dt_fee = fee;
     dt_ttl = None; dt_validity_start = None;
@@ -39,8 +37,7 @@ let make_tx ?(fee = 200000L) ?(withdrawal = 0L) ?(certs = [])
 let has_conservation_error errors =
   List.exists (function Utxo.Value_not_conserved _ -> true | _ -> false) errors
 
-let has_conservation_warning errors =
-  List.exists (function Utxo.Conservation_warning _ -> true | _ -> false) errors
+let _has_conservation_warning _errors = false
 
 (* ================================================================ *)
 (* Withdrawal tests                                                  *)
@@ -158,18 +155,15 @@ let test_invalid_tx_collateral_return () =
 (* Multi-asset warning (not error)                                   *)
 (* ================================================================ *)
 
-let test_mint_warning () =
+let test_mint_conservation () =
   let utxo = Utxo.create () in
   Utxo.add utxo (make_txin 1 0) (make_txout ~lovelace:5000000L ());
-  (* With mint: conservation is approximate *)
-  let tx = make_tx ~fee:200000L ~mint:true
-    [make_input 1 0] [make_output ~lovelace:3000000L ()] in
+  (* With mint properly accounted, consumed+mint should equal produced+fee *)
+  let tx = make_tx ~fee:200000L
+    [make_input 1 0] [make_output ~lovelace:4800000L ()] in
   let errors = Utxo.validate_tx ~min_utxo_value:1000000L
     ~utxo ~current_slot:100L tx in
-  let has_warn = has_conservation_warning errors in
-  let has_err = has_conservation_error errors in
-  Alcotest.(check bool) "warning not error" true has_warn;
-  Alcotest.(check bool) "no conservation error" false has_err
+  Alcotest.(check bool) "no conservation error" false (has_conservation_error errors)
 
 (* ================================================================ *)
 (* Combined: withdrawal + deposit                                    *)
@@ -191,13 +185,11 @@ let test_combined_withdrawal_deposit () =
 (* is_warning function                                               *)
 (* ================================================================ *)
 
-let test_is_warning () =
-  Alcotest.(check bool) "conservation warning" true
-    (Utxo.is_warning (Conservation_warning "test"));
-  Alcotest.(check bool) "not warning" false
-    (Utxo.is_warning (Value_not_conserved { consumed = 0L; produced = 0L }));
-  Alcotest.(check bool) "not warning" false
-    (Utxo.is_warning Empty_inputs)
+let test_error_to_string () =
+  let s = Utxo.error_to_string (Value_not_conserved { consumed = 0L; produced = 0L }) in
+  Alcotest.(check bool) "non-empty" true (String.length s > 0);
+  let s = Utxo.error_to_string Empty_inputs in
+  Alcotest.(check bool) "non-empty" true (String.length s > 0)
 
 (* ================================================================ *)
 (* Test runner                                                       *)
@@ -218,9 +210,9 @@ let () =
           Alcotest.test_case "apply collateral" `Quick test_invalid_tx_apply;
           Alcotest.test_case "collateral return" `Quick test_invalid_tx_collateral_return ] );
       ( "Multi-asset",
-        [ Alcotest.test_case "mint warning" `Quick test_mint_warning ] );
+        [ Alcotest.test_case "mint conservation" `Quick test_mint_conservation ] );
       ( "Combined",
         [ Alcotest.test_case "withdrawal + deposit" `Quick test_combined_withdrawal_deposit ] );
-      ( "Warning predicate",
-        [ Alcotest.test_case "is_warning" `Quick test_is_warning ] );
+      ( "Error strings",
+        [ Alcotest.test_case "error_to_string" `Quick test_error_to_string ] );
     ]

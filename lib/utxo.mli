@@ -1,10 +1,9 @@
 (** UTXO set management and transaction validation.
 
-    Reference: Shelley formal ledger spec (SL-D5), Section 9 "UTxO"
-
-    Conservation equation:
-    consumed = sum(inputs) + withdrawals + refunds
-    produced = sum(outputs) + fee + deposits *)
+    Full multi-asset conservation:
+    consumed + mint = produced
+    where consumed = sum(inputs) + withdrawals + refunds
+    and produced = sum(outputs) + fee + deposits *)
 
 module TxIn : sig
   type t = { tx_hash : bytes; tx_index : int }
@@ -16,8 +15,10 @@ end
 
 module TxOut : sig
   type t = {
-    address : bytes; lovelace : int64;
-    has_multi_asset : bool; has_datum : bool; has_script_ref : bool;
+    address : bytes;
+    value : Multi_asset.value;
+    has_datum : bool;
+    has_script_ref : bool;
   }
   val of_decoder : Tx_decoder.tx_output -> t
 end
@@ -32,6 +33,7 @@ val add : utxo_set -> TxIn.t -> TxOut.t -> unit
 val remove : utxo_set -> TxIn.t -> unit
 val iter : (TxIn.t -> TxOut.t -> unit) -> utxo_set -> unit
 val total_lovelace : utxo_set -> int64
+val total_assets : utxo_set -> int
 
 type validation_error =
   | Input_not_in_utxo of TxIn.t
@@ -42,10 +44,8 @@ type validation_error =
   | Expired_ttl of { slot : int64; ttl : int64 }
   | Empty_inputs
   | Empty_outputs
-  | Conservation_warning of string
 
 val error_to_string : validation_error -> string
-val is_warning : validation_error -> bool
 
 val validate_tx :
   ?min_fee_a:int64 -> ?min_fee_b:int64 ->

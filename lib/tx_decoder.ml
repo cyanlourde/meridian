@@ -4,9 +4,7 @@
    Shelley+ txs follow: {0: inputs, 1: outputs, 2: fee, ...}
    Byron txs follow: [inputs, outputs, attributes]
 
-   Extracts all fields affecting value conservation:
-   inputs, outputs, fee, withdrawals, certificates (deposits/refunds),
-   collateral inputs, collateral return, total collateral, mint flag. *)
+   Outputs carry full Multi_asset.value for proper conservation checks. *)
 
 let ( let* ) = Result.bind
 
@@ -21,19 +19,17 @@ type tx_input = {
 
 type tx_output = {
   to_address : bytes;
-  to_lovelace : int64;
-  to_has_multi_asset : bool;
+  to_value : Multi_asset.value;
   to_has_datum : bool;
   to_has_script_ref : bool;
 }
 
-(** Certificate types relevant to deposit tracking. *)
 type cert_action =
-  | Cert_stake_registration      (** costs key_deposit *)
-  | Cert_stake_deregistration    (** refunds key_deposit *)
-  | Cert_pool_registration       (** costs pool_deposit *)
-  | Cert_pool_retirement         (** refunds pool_deposit at retirement epoch *)
-  | Cert_other                   (** no deposit effect *)
+  | Cert_stake_registration
+  | Cert_stake_deregistration
+  | Cert_pool_registration
+  | Cert_pool_retirement
+  | Cert_other
 
 type decoded_tx = {
   dt_inputs : tx_input list;
@@ -42,12 +38,12 @@ type decoded_tx = {
   dt_ttl : int64 option;
   dt_validity_start : int64 option;
   dt_certs : cert_action list;
-  dt_withdrawal_total : int64;  (** Sum of all withdrawal amounts *)
-  dt_mint : bool;
+  dt_withdrawal_total : int64;
+  dt_mint : Multi_asset.value;
   dt_collateral_inputs : tx_input list;
   dt_collateral_return : tx_output option;
   dt_total_collateral : int64 option;
-  dt_is_valid : bool;           (** true for normal txs, false for failed Plutus *)
+  dt_is_valid : bool;
   dt_era : Block_decoder.era;
 }
 
@@ -68,59 +64,45 @@ let decode_input = function
     Ok { ti_tx_hash = tx_hash; ti_index = idx }
   | _ -> Error "tx_input: expected [hash32, uint]"
 
+(* ================================================================ *)
+(* Output decoders — all use Multi_asset.value                       *)
+(* ================================================================ *)
+
 let decode_shelley_output = function
   | Cbor.Array [Cbor.Bytes addr; Cbor.Uint amount] ->
-    Ok { to_address = addr; to_lovelace = amount;
-         to_has_multi_asset = false; to_has_datum = false;
-         to_has_script_ref = false }
+    Ok { to_address = addr; to_value = Multi_asset.of_lovelace amount;
+         to_has_datum = false; to_has_script_ref = false }
   | _ -> Error "shelley output: expected [addr, coin]"
 
 let decode_mary_output = function
-  | Cbor.Array [Cbor.Bytes addr; Cbor.Uint amount] ->
-    Ok { to_address = addr; to_lovelace = amount;
-         to_has_multi_asset = false; to_has_datum = false;
-         to_has_script_ref = false }
-  | Cbor.Array [Cbor.Bytes addr; Cbor.Array [Cbor.Uint amount; _multi_asset]] ->
-    Ok { to_address = addr; to_lovelace = amount;
-         to_has_multi_asset = true; to_has_datum = false;
-         to_has_script_ref = false }
+  | Cbor.Array [Cbor.Bytes addr; val_cbor] ->
+    Ok { to_address = addr; to_value = Multi_asset.of_cbor val_cbor;
+         to_has_datum = false; to_has_script_ref = false }
   | _ -> Error "mary output: expected [addr, value]"
 
 let decode_alonzo_output = function
   | Cbor.Array [Cbor.Bytes addr; val_cbor] ->
-    let lovelace = match val_cbor with
-      | Cbor.Uint n -> n | Cbor.Array (Cbor.Uint n :: _) -> n | _ -> 0L in
-    let multi_asset = match val_cbor with
-      | Cbor.Array (_ :: _ :: _) -> true | _ -> false in
-    Ok { to_address = addr; to_lovelace = lovelace;
-         to_has_multi_asset = multi_asset; to_has_datum = false;
-         to_has_script_ref = false }
+    Ok { to_address = addr; to_value = Multi_asset.of_cbor val_cbor;
+         to_has_datum = false; to_has_script_ref = false }
   | Cbor.Array [Cbor.Bytes addr; val_cbor; _datum_hash] ->
-    let lovelace = match val_cbor with
-      | Cbor.Uint n -> n | Cbor.Array (Cbor.Uint n :: _) -> n | _ -> 0L in
-    Ok { to_address = addr; to_lovelace = lovelace;
-         to_has_multi_asset = false; to_has_datum = true;
-         to_has_script_ref = false }
+    Ok { to_address = addr; to_value = Multi_asset.of_cbor val_cbor;
+         to_has_datum = true; to_has_script_ref = false }
   | _ -> Error "alonzo output: unexpected format"
 
 let decode_babbage_output = function
   | Cbor.Map pairs ->
     let addr = match find_map_uint_key 0 pairs with
       | Some (Cbor.Bytes a) -> a | _ -> Bytes.empty in
-    let lovelace = match find_map_uint_key 1 pairs with
-      | Some (Cbor.Uint n) -> n
-      | Some (Cbor.Array (Cbor.Uint n :: _)) -> n | _ -> 0L in
-    let multi_asset = match find_map_uint_key 1 pairs with
-      | Some (Cbor.Array (_ :: _ :: _)) -> true | _ -> false in
+    let value = match find_map_uint_key 1 pairs with
+      | Some v -> Multi_asset.of_cbor v | None -> Multi_asset.zero in
     let has_datum = find_map_uint_key 2 pairs <> None in
     let has_script = find_map_uint_key 3 pairs <> None in
-    Ok { to_address = addr; to_lovelace = lovelace;
-         to_has_multi_asset = multi_asset;
+    Ok { to_address = addr; to_value = value;
          to_has_datum = has_datum; to_has_script_ref = has_script }
   | cbor -> decode_alonzo_output cbor
 
 (* ================================================================ *)
-(* Certificate parsing (deposit-relevant only)                       *)
+(* Certificate parsing                                               *)
 (* ================================================================ *)
 
 let decode_cert_action = function
@@ -128,13 +110,9 @@ let decode_cert_action = function
   | Cbor.Array (Cbor.Uint 1L :: _) -> Cert_stake_deregistration
   | Cbor.Array (Cbor.Uint 3L :: _) -> Cert_pool_registration
   | Cbor.Array (Cbor.Uint 4L :: _) -> Cert_pool_retirement
-  | Cbor.Array (Cbor.Uint 7L :: _) -> Cert_stake_registration  (* Conway reg_cert *)
-  | Cbor.Array (Cbor.Uint 8L :: _) -> Cert_stake_deregistration (* Conway unreg_cert *)
+  | Cbor.Array (Cbor.Uint 7L :: _) -> Cert_stake_registration
+  | Cbor.Array (Cbor.Uint 8L :: _) -> Cert_stake_deregistration
   | _ -> Cert_other
-
-(* ================================================================ *)
-(* Withdrawal total                                                  *)
-(* ================================================================ *)
 
 let sum_withdrawals = function
   | Cbor.Map pairs ->
@@ -177,7 +155,8 @@ let decode_map_tx_body era pairs =
     | _ -> [] in
   let withdrawal_total = match find 5 pairs with
     | Some wds -> sum_withdrawals wds | None -> 0L in
-  let mint = find 9 pairs <> None in
+  let mint = match find 9 pairs with
+    | Some v -> Multi_asset.mint_of_cbor v | None -> Multi_asset.zero in
   let collateral_inputs = match find 13 pairs with
     | Some (Cbor.Array items) ->
       List.filter_map (fun c -> match decode_input c with Ok i -> Some i | _ -> None) items
@@ -194,12 +173,8 @@ let decode_map_tx_body era pairs =
        dt_collateral_inputs = collateral_inputs;
        dt_collateral_return = collateral_return;
        dt_total_collateral = total_collateral;
-       dt_is_valid = true;  (* set by caller from outer tx wrapper *)
+       dt_is_valid = true;
        dt_era = era }
-
-(* ================================================================ *)
-(* Public API                                                        *)
-(* ================================================================ *)
 
 let decode_transaction ~era cbor =
   match era, cbor with
@@ -214,15 +189,14 @@ let decode_transaction ~era cbor =
     ) inputs in
     let* dt_outputs = list_map_ok (function
       | Cbor.Array [_addr; Cbor.Uint amount] ->
-        Ok { to_address = Bytes.empty; to_lovelace = amount;
-             to_has_multi_asset = false; to_has_datum = false;
-             to_has_script_ref = false }
+        Ok { to_address = Bytes.empty; to_value = Multi_asset.of_lovelace amount;
+             to_has_datum = false; to_has_script_ref = false }
       | _ -> Error "byron output: expected [addr, coin]"
     ) outputs in
     Ok { dt_inputs; dt_outputs; dt_fee = 0L;
          dt_ttl = None; dt_validity_start = None;
          dt_certs = []; dt_withdrawal_total = 0L;
-         dt_mint = false;
+         dt_mint = Multi_asset.zero;
          dt_collateral_inputs = []; dt_collateral_return = None;
          dt_total_collateral = None; dt_is_valid = true;
          dt_era = era }

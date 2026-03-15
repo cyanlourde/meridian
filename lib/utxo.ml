@@ -2,14 +2,11 @@
 
    Reference: Shelley formal ledger spec (SL-D5), Section 9 "UTxO"
 
-   Conservation equation (Shelley spec):
-     consumed = sum(inputs) + withdrawals + refunds
-     produced = sum(outputs) + fee + deposits
-   Where deposits/refunds come from certificates (stake reg/dereg, pool reg/retirement). *)
-
-(* ================================================================ *)
-(* UTxO key and value                                                *)
-(* ================================================================ *)
+   Conservation equation (multi-asset):
+     consumed + mint = produced
+   Where:
+     consumed = sum(input_values) + withdrawals_value + refund_value
+     produced = sum(output_values) + fee_value + deposit_value *)
 
 module TxIn = struct
   type t = { tx_hash : bytes; tx_index : int }
@@ -33,19 +30,16 @@ end
 
 module TxOut = struct
   type t = {
-    address : bytes; lovelace : int64;
-    has_multi_asset : bool; has_datum : bool; has_script_ref : bool;
+    address : bytes;
+    value : Multi_asset.value;
+    has_datum : bool;
+    has_script_ref : bool;
   }
 
   let of_decoder (out : Tx_decoder.tx_output) =
-    { address = out.to_address; lovelace = out.to_lovelace;
-      has_multi_asset = out.to_has_multi_asset;
+    { address = out.to_address; value = out.to_value;
       has_datum = out.to_has_datum; has_script_ref = out.to_has_script_ref }
 end
-
-(* ================================================================ *)
-(* UTxO set                                                          *)
-(* ================================================================ *)
 
 module TxInMap = Map.Make(TxIn)
 
@@ -72,10 +66,15 @@ let remove s txin =
 let iter f s = TxInMap.iter (fun k v -> f k v) s.entries
 
 let total_lovelace s =
-  TxInMap.fold (fun _k v acc -> Int64.add acc v.TxOut.lovelace) s.entries 0L
+  TxInMap.fold (fun _k v acc ->
+    Int64.add acc (Multi_asset.lovelace_of v.TxOut.value)) s.entries 0L
+
+let total_assets s =
+  TxInMap.fold (fun _k v acc ->
+    acc + Multi_asset.asset_count v.TxOut.value) s.entries 0
 
 (* ================================================================ *)
-(* Validation errors and warnings                                    *)
+(* Validation errors                                                 *)
 (* ================================================================ *)
 
 type validation_error =
@@ -87,7 +86,6 @@ type validation_error =
   | Expired_ttl of { slot : int64; ttl : int64 }
   | Empty_inputs
   | Empty_outputs
-  | Conservation_warning of string  (** Approximate check — multi-asset *)
 
 let error_to_string = function
   | Input_not_in_utxo txin ->
@@ -104,12 +102,9 @@ let error_to_string = function
     Printf.sprintf "TTL expired: slot %Ld > TTL %Ld" slot ttl
   | Empty_inputs -> "transaction has no inputs"
   | Empty_outputs -> "transaction has no outputs"
-  | Conservation_warning msg -> Printf.sprintf "WARN: %s" msg
-
-let is_warning = function Conservation_warning _ -> true | _ -> false
 
 (* ================================================================ *)
-(* Deposit/refund calculation from certificates                      *)
+(* Deposit/refund                                                    *)
 (* ================================================================ *)
 
 let compute_deposits ?(key_deposit = 2000000L) ?(pool_deposit = 500000000L)
@@ -123,17 +118,9 @@ let compute_deposits ?(key_deposit = 2000000L) ?(pool_deposit = 500000000L)
       refunds := Int64.add !refunds key_deposit
     | Cert_pool_registration ->
       deposits := Int64.add !deposits pool_deposit
-    | Cert_pool_retirement ->
-      (* Pool deposit refunded at retirement epoch, not immediately.
-         For conservation, we don't count it as immediate refund. *)
-      ()
-    | Cert_other -> ()
+    | Cert_pool_retirement | Cert_other -> ()
   ) certs;
   (!deposits, !refunds)
-
-(* ================================================================ *)
-(* Fee minimum                                                       *)
-(* ================================================================ *)
 
 let min_fee ~min_fee_a ~min_fee_b ~tx_size =
   Int64.add (Int64.mul min_fee_a (Int64.of_int tx_size)) min_fee_b
@@ -150,21 +137,19 @@ let validate_tx ?(min_fee_a = 44L) ?(min_fee_b = 155381L)
   let add e = errors := e :: !errors in
 
   if not tx.dt_is_valid then begin
-    (* Failed Plutus tx: consume collateral, skip normal validation *)
+    (* Failed Plutus: validate collateral only *)
     List.iter (fun (inp : Tx_decoder.tx_input) ->
       let txin = TxIn.of_decoder inp in
-      if not (mem utxo txin) then
-        add (Input_not_in_utxo txin)
+      if not (mem utxo txin) then add (Input_not_in_utxo txin)
     ) tx.dt_collateral_inputs;
     List.rev !errors
   end else begin
-    (* Normal transaction validation *)
     if tx.dt_inputs = [] then add Empty_inputs;
     if tx.dt_outputs = [] then add Empty_outputs;
 
-    (* Check inputs exist and sum consumed value *)
+    (* Check inputs exist and sum consumed value (full multi-asset) *)
     let seen = Hashtbl.create (List.length tx.dt_inputs) in
-    let consumed_inputs = ref 0L in
+    let consumed_value = ref Multi_asset.zero in
     List.iter (fun (inp : Tx_decoder.tx_input) ->
       let txin = TxIn.of_decoder inp in
       if Hashtbl.mem seen (txin.tx_hash, txin.tx_index) then
@@ -173,7 +158,7 @@ let validate_tx ?(min_fee_a = 44L) ?(min_fee_b = 155381L)
         Hashtbl.replace seen (txin.tx_hash, txin.tx_index) ();
         match find utxo txin with
         | None -> add (Input_not_in_utxo txin)
-        | Some out -> consumed_inputs := Int64.add !consumed_inputs out.TxOut.lovelace
+        | Some out -> consumed_value := Multi_asset.add !consumed_value out.value
       end
     ) tx.dt_inputs;
 
@@ -182,11 +167,12 @@ let validate_tx ?(min_fee_a = 44L) ?(min_fee_b = 155381L)
     if tx.dt_fee < required_fee then
       add (Insufficient_fee { required = required_fee; actual = tx.dt_fee });
 
-    (* Output minimums *)
+    (* Output minimums (lovelace component) *)
     List.iteri (fun i (out : Tx_decoder.tx_output) ->
-      if out.to_lovelace < min_utxo_value then
-        add (Output_too_small { index = i; lovelace = out.to_lovelace;
-                                minimum = min_utxo_value })
+      if Multi_asset.lovelace_of out.to_value < min_utxo_value then
+        add (Output_too_small { index = i;
+               lovelace = Multi_asset.lovelace_of out.to_value;
+               minimum = min_utxo_value })
     ) tx.dt_outputs;
 
     (* TTL *)
@@ -195,24 +181,27 @@ let validate_tx ?(min_fee_a = 44L) ?(min_fee_b = 155381L)
        add (Expired_ttl { slot = current_slot; ttl })
      | _ -> ());
 
-    (* Value conservation:
-       consumed = sum(inputs) + withdrawals + refunds
-       produced = sum(outputs) + fee + deposits *)
+    (* Value conservation (full multi-asset):
+       consumed + mint = produced
+       where consumed includes withdrawal and refund lovelace,
+       produced includes fee and deposit lovelace *)
     let (deposits, refunds) = compute_deposits ~key_deposit ~pool_deposit tx.dt_certs in
-    let consumed = Int64.add (Int64.add !consumed_inputs tx.dt_withdrawal_total) refunds in
-    let produced_outputs = List.fold_left (fun acc (out : Tx_decoder.tx_output) ->
-      Int64.add acc out.to_lovelace) 0L tx.dt_outputs in
-    let produced = Int64.add (Int64.add produced_outputs tx.dt_fee) deposits in
+    let consumed_with_extras = Multi_asset.add !consumed_value
+      (Multi_asset.of_lovelace (Int64.add tx.dt_withdrawal_total refunds)) in
+    let consumed_plus_mint = Multi_asset.add consumed_with_extras tx.dt_mint in
 
-    if !consumed_inputs > 0L then begin
-      if tx.dt_mint then
-        (* Multi-asset minting: conservation check is approximate *)
-        (if not (Int64.equal consumed produced) then
-           add (Conservation_warning
-                  (Printf.sprintf "mint tx: consumed %Ld != produced %Ld (multi-asset)" consumed produced)))
-      else if not (Int64.equal consumed produced) then
-        add (Value_not_conserved { consumed; produced })
-    end;
+    let produced_outputs = List.fold_left (fun acc (out : Tx_decoder.tx_output) ->
+      Multi_asset.add acc out.to_value) Multi_asset.zero tx.dt_outputs in
+    let produced = Multi_asset.add produced_outputs
+      (Multi_asset.of_lovelace (Int64.add tx.dt_fee deposits)) in
+
+    let consumed_lovelace = Multi_asset.lovelace_of !consumed_value in
+    if consumed_lovelace > 0L && not (Multi_asset.equal
+         (Multi_asset.filter_zero consumed_plus_mint)
+         (Multi_asset.filter_zero produced)) then
+      add (Value_not_conserved {
+        consumed = Multi_asset.lovelace_of consumed_plus_mint;
+        produced = Multi_asset.lovelace_of produced });
 
     List.rev !errors
   end
@@ -223,23 +212,19 @@ let validate_tx ?(min_fee_a = 44L) ?(min_fee_b = 155381L)
 
 let apply_tx utxo ~tx_hash (tx : Tx_decoder.decoded_tx) =
   if not tx.dt_is_valid then begin
-    (* Failed Plutus: consume collateral, produce collateral_return *)
     List.iter (fun (inp : Tx_decoder.tx_input) ->
       remove utxo (TxIn.of_decoder inp)
     ) tx.dt_collateral_inputs;
     (match tx.dt_collateral_return with
      | Some out ->
-       let txin = TxIn.{ tx_hash; tx_index = 0 } in
-       add utxo txin (TxOut.of_decoder out)
+       add utxo TxIn.{ tx_hash; tx_index = 0 } (TxOut.of_decoder out)
      | None -> ())
   end else begin
-    (* Normal: remove inputs, add outputs *)
     List.iter (fun (inp : Tx_decoder.tx_input) ->
       remove utxo (TxIn.of_decoder inp)
     ) tx.dt_inputs;
     List.iteri (fun i (out : Tx_decoder.tx_output) ->
-      let txin = TxIn.{ tx_hash; tx_index = i } in
-      add utxo txin (TxOut.of_decoder out)
+      add utxo TxIn.{ tx_hash; tx_index = i } (TxOut.of_decoder out)
     ) tx.dt_outputs
   end
 

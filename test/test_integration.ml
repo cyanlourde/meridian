@@ -118,9 +118,8 @@ let test_resume_with_snapshot () =
   (* Add to UTXO directly *)
   Utxo.add (Ledger_state.utxo ls)
     Utxo.TxIn.{ tx_hash = make_hash 99; tx_index = 0 }
-    Utxo.TxOut.{ address = make_addr (); lovelace = 5000000L;
-                 has_multi_asset = false; has_datum = false;
-                 has_script_ref = false };
+    Utxo.TxOut.{ address = make_addr (); value = Multi_asset.of_lovelace 5000000L;
+                 has_datum = false; has_script_ref = false };
   (* Snapshot *)
   let path = Filename.concat dir "ledger.snapshot" in
   Ledger_state.snapshot ls ~path;
