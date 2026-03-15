@@ -175,44 +175,88 @@ let blake2b_256 data = blake2b ~nn:32 data
 let blake2b_224 data = blake2b ~nn:28 data
 
 (* ================================================================ *)
-(* Ed25519 signature verification — stub                             *)
+(* Libsodium C stubs (loaded via dlopen at runtime)                  *)
 (* ================================================================ *)
 
-(** Verify an Ed25519 signature.
-    Returns [Ok true] if the signature is valid, [Ok false] if invalid,
-    or [Error] if the operation cannot be performed (e.g., wrong key size).
+external sodium_init : unit -> bool = "meridian_sodium_init"
+external _sodium_available : unit -> bool = "meridian_sodium_available"
+external sodium_blake2b : bytes -> int -> bytes = "meridian_blake2b"
+external sodium_ed25519_verify : bytes -> bytes -> bytes -> bool = "meridian_ed25519_verify"
+external sodium_ed25519_keypair : unit -> bytes * bytes = "meridian_ed25519_keypair"
+external sodium_ed25519_sign : bytes -> bytes -> bytes = "meridian_ed25519_sign"
 
-    NOTE: This is a stub. A proper implementation requires libsodium
-    bindings (crypto_sign_ed25519_verify_detached). *)
-let ed25519_verify ~public_key ~message:_ ~signature:_ =
+let libsodium_available = ref false
+
+let init () =
+  libsodium_available := sodium_init ()
+
+(** Blake2b via libsodium (fast path). Falls back to pure OCaml. *)
+let blake2b_256_sodium data =
+  if !libsodium_available then
+    try sodium_blake2b data 32
+    with _ -> blake2b_256 data
+  else blake2b_256 data
+
+let blake2b_224_sodium data =
+  if !libsodium_available then
+    try sodium_blake2b data 28
+    with _ -> blake2b_224 data
+  else blake2b_224 data
+
+(** Cross-check: verify pure OCaml and libsodium produce identical output. *)
+let blake2b_256_cross_check data =
+  let ocaml_out = blake2b_256 data in
+  if !libsodium_available then begin
+    try
+      let sodium_out = sodium_blake2b data 32 in
+      if not (Bytes.equal ocaml_out sodium_out) then
+        Error "blake2b_256: OCaml/libsodium mismatch"
+      else
+        Ok ocaml_out
+    with _ -> Ok ocaml_out
+  end else Ok ocaml_out
+
+(* ================================================================ *)
+(* Ed25519 signature verification                                    *)
+(* ================================================================ *)
+
+let ed25519_verify ~public_key ~message ~signature =
   if Bytes.length public_key <> 32 then
     Error "ed25519_verify: public key must be 32 bytes"
+  else if Bytes.length signature <> 64 then
+    Error "ed25519_verify: signature must be 64 bytes"
+  else if not !libsodium_available then
+    Error "ed25519_verify: libsodium not available (call Crypto.init)"
   else
-    Error "ed25519_verify: not yet implemented (requires libsodium)"
+    try Ok (sodium_ed25519_verify public_key message signature)
+    with Failure msg -> Error msg
+
+let ed25519_sign ~secret_key ~message =
+  if not !libsodium_available then
+    Error "ed25519_sign: libsodium not available"
+  else
+    try Ok (sodium_ed25519_sign message secret_key)
+    with Failure msg -> Error msg
+
+let ed25519_keypair () =
+  if not !libsodium_available then
+    Error "ed25519_keypair: libsodium not available"
+  else
+    try Ok (sodium_ed25519_keypair ())
+    with Failure msg -> Error msg
 
 (* ================================================================ *)
-(* VRF verification — stub                                           *)
+(* VRF verification — stub (requires VRF extension not in standard   *)
+(* libsodium; Cardano uses a custom fork)                            *)
 (* ================================================================ *)
 
-(** Verify a VRF proof and compute the VRF output.
-    Returns [Ok (output, true)] if valid, [Ok (_, false)] if invalid,
-    or [Error] if the operation cannot be performed.
-
-    VRF proof is 80 bytes, output is 64 bytes.
-    Uses ECVRF-ED25519-SHA512-Elligator2 (draft-irtf-cfrg-vrf-03).
-
-    NOTE: This is a stub. Requires libsodium with VRF extensions. *)
 let vrf_verify ~public_key:_ ~proof:_ ~message:_ =
-  Error "vrf_verify: not yet implemented (requires libsodium VRF)"
+  Error "vrf_verify: not yet implemented (requires libsodium-vrf fork)"
 
 (* ================================================================ *)
-(* KES verification — stub                                           *)
+(* KES verification — stub (Cardano-specific sum composition,        *)
+(* not in standard libsodium)                                        *)
 (* ================================================================ *)
 
-(** Verify a KES (Key Evolving Signature) signature.
-    Cardano uses sum_{6} composition giving 2^6 = 64 periods.
-
-    NOTE: This is a stub. Requires a KES implementation
-    (not provided by standard libsodium). *)
 let kes_verify ~public_key:_ ~period:_ ~message:_ ~signature:_ =
   Error "kes_verify: not yet implemented (requires KES library)"

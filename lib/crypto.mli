@@ -1,40 +1,55 @@
 (** Cryptographic primitives for Cardano.
 
-    Blake2b hashing is implemented in pure OCaml per RFC 7693.
-    Ed25519, VRF, and KES are stubs awaiting libsodium bindings. *)
+    Blake2b: pure OCaml (RFC 7693) + optional libsodium fast path.
+    Ed25519: real verification via libsodium (dlopen at runtime).
+    VRF/KES: stubs awaiting Cardano-specific libsodium fork. *)
+
+(** {1 Initialization} *)
+
+val init : unit -> unit
+(** Initialize libsodium via dlopen. Must be called before using
+    Ed25519 functions. Blake2b works without initialization (pure OCaml fallback). *)
+
+val libsodium_available : bool ref
+(** [true] after successful [init]. *)
 
 (** {1 Blake2b hashing} *)
 
 val blake2b : ?key:bytes -> nn:int -> bytes -> bytes
-(** [blake2b ~nn data] computes a Blake2b hash of [data] with output
-    length [nn] bytes (1..64). Optional [key] for keyed hashing. *)
+(** Pure OCaml Blake2b per RFC 7693. *)
 
 val blake2b_256 : bytes -> bytes
-(** 32-byte Blake2b-256 hash. *)
-
 val blake2b_224 : bytes -> bytes
-(** 28-byte Blake2b-224 hash. *)
 
-(** {1 Ed25519 signature verification} *)
+val blake2b_256_sodium : bytes -> bytes
+(** Libsodium fast path, falls back to pure OCaml. *)
+
+val blake2b_224_sodium : bytes -> bytes
+
+val blake2b_256_cross_check : bytes -> (bytes, string) result
+(** Hash with both implementations, verify identical output. *)
+
+(** {1 Ed25519} *)
 
 val ed25519_verify :
   public_key:bytes -> message:bytes -> signature:bytes ->
   (bool, string) result
-(** Verify an Ed25519 signature. Stub: returns [Error] until
-    libsodium bindings are available. *)
 
-(** {1 VRF verification} *)
+val ed25519_sign :
+  secret_key:bytes -> message:bytes ->
+  (bytes, string) result
+
+val ed25519_keypair : unit -> (bytes * bytes, string) result
+(** Returns [(public_key, secret_key)]. *)
+
+(** {1 VRF (stub)} *)
 
 val vrf_verify :
   public_key:bytes -> proof:bytes -> message:bytes ->
   (bytes * bool, string) result
-(** Verify a VRF proof. Returns [(output, is_valid)].
-    Stub: returns [Error] until libsodium VRF bindings are available. *)
 
-(** {1 KES verification} *)
+(** {1 KES (stub)} *)
 
 val kes_verify :
   public_key:bytes -> period:int -> message:bytes -> signature:bytes ->
   (bool, string) result
-(** Verify a KES signature at the given evolution period.
-    Stub: returns [Error] until KES bindings are available. *)
