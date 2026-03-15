@@ -32,6 +32,8 @@ val find : utxo_set -> TxIn.t -> TxOut.t option
 val add : utxo_set -> TxIn.t -> TxOut.t -> unit
 val remove : utxo_set -> TxIn.t -> unit
 val iter : (TxIn.t -> TxOut.t -> unit) -> utxo_set -> unit
+val find_by_address : utxo_set -> address:bytes -> (TxIn.t * TxOut.t) list
+val find_by_txins : utxo_set -> TxIn.t list -> (TxIn.t * TxOut.t option) list
 val total_lovelace : utxo_set -> int64
 val total_assets : utxo_set -> int
 

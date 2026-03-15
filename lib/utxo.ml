@@ -65,6 +65,16 @@ let remove s txin =
 
 let iter f s = TxInMap.iter (fun k v -> f k v) s.entries
 
+(** Find all UTXOs at a given address. O(n) scan. *)
+let find_by_address s ~address =
+  TxInMap.fold (fun k v acc ->
+    if Bytes.equal v.TxOut.address address then (k, v) :: acc else acc
+  ) s.entries []
+
+(** Look up specific TxIns. O(log n) per lookup. *)
+let find_by_txins s txins =
+  List.map (fun txin -> (txin, TxInMap.find_opt txin s.entries)) txins
+
 let total_lovelace s =
   TxInMap.fold (fun _k v acc ->
     Int64.add acc (Multi_asset.lovelace_of v.TxOut.value)) s.entries 0L
