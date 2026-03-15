@@ -130,6 +130,117 @@ let test_agency () =
   Alcotest.(check bool) "done=nobody" true
     (Block_fetch.agency_of StDone = Nobody_agency)
 
+(* ---- Protocol ID in mux framing ---- *)
+
+let test_mux_protocol_id () =
+  let payload = Block_fetch.to_bytes (MsgRequestRange (pt1, pt2)) in
+  let hdr = Mux.encode_segment_header Mux.{
+    timestamp = 0l;
+    protocol_id = Miniprotocol.block_fetch;
+    payload_length = Bytes.length payload;
+    from_initiator = true;
+  } in
+  match Mux.decode_segment_header hdr with
+  | Error e -> Alcotest.fail e
+  | Ok decoded ->
+    Alcotest.(check int) "protocol_id = 3" 3 decoded.protocol_id;
+    Alcotest.(check bool) "initiator" true decoded.from_initiator
+
+(* ---- Pipe simulation: full batch ---- *)
+
+let test_pipe_full_batch () =
+  let (c2s_rd, c2s_wr) = Unix.pipe () in
+  let (s2c_rd, s2c_wr) = Unix.pipe () in
+  let client_out = Mux.create ~fd:c2s_wr ~mode:Initiator in
+  let client_in = Mux.create ~fd:s2c_rd ~mode:Initiator in
+  let server_in = Mux.create ~fd:c2s_rd ~mode:Responder in
+  let server_out = Mux.create ~fd:s2c_wr ~mode:Responder in
+  let cleanup () =
+    List.iter (fun fd -> try Unix.close fd with _ -> ())
+      [c2s_rd; c2s_wr; s2c_rd; s2c_wr]
+  in
+  let pid = Miniprotocol.block_fetch in
+  let send mux msg =
+    let payload = Block_fetch.to_bytes msg in
+    match Mux.send_segment mux ~protocol_id:pid ~timestamp:0l payload with
+    | Ok () -> () | Error e -> cleanup (); Alcotest.fail e
+  in
+  let recv mux =
+    match Mux.recv_segment mux with
+    | Error e -> cleanup (); Alcotest.fail e
+    | Ok (hdr, payload) ->
+      Alcotest.(check int) "bf protocol" 3 hdr.protocol_id;
+      match Block_fetch.of_bytes payload with
+      | Error e -> cleanup (); Alcotest.fail e
+      | Ok msg -> msg
+  in
+  (* Client sends RequestRange *)
+  send client_out (MsgRequestRange (pt1, pt2));
+  (match recv server_in with
+   | MsgRequestRange _ -> ()
+   | _ -> cleanup (); Alcotest.fail "expected RequestRange");
+  (* Server sends StartBatch *)
+  send server_out MsgStartBatch;
+  (match recv client_in with
+   | MsgStartBatch -> ()
+   | _ -> cleanup (); Alcotest.fail "expected StartBatch");
+  (* Server streams 3 blocks with known payloads *)
+  let block_data = [|
+    Bytes.make 100 '\x01';
+    Bytes.make 200 '\x02';
+    Bytes.make 50 '\x03';
+  |] in
+  Array.iter (fun data ->
+    send server_out (MsgBlock data);
+    match recv client_in with
+    | MsgBlock received ->
+      Alcotest.check bytes_testable "block payload" data received
+    | _ -> cleanup (); Alcotest.fail "expected MsgBlock"
+  ) block_data;
+  (* Server sends BatchDone *)
+  send server_out MsgBatchDone;
+  (match recv client_in with
+   | MsgBatchDone -> ()
+   | _ -> cleanup (); Alcotest.fail "expected BatchDone");
+  cleanup ()
+
+(* ---- Pipe simulation: NoBlocks path ---- *)
+
+let test_pipe_no_blocks () =
+  let (c2s_rd, c2s_wr) = Unix.pipe () in
+  let (s2c_rd, s2c_wr) = Unix.pipe () in
+  let client_out = Mux.create ~fd:c2s_wr ~mode:Initiator in
+  let client_in = Mux.create ~fd:s2c_rd ~mode:Initiator in
+  let server_in = Mux.create ~fd:c2s_rd ~mode:Responder in
+  let server_out = Mux.create ~fd:s2c_wr ~mode:Responder in
+  let cleanup () =
+    List.iter (fun fd -> try Unix.close fd with _ -> ())
+      [c2s_rd; c2s_wr; s2c_rd; s2c_wr]
+  in
+  let pid = Miniprotocol.block_fetch in
+  let send mux msg =
+    let payload = Block_fetch.to_bytes msg in
+    match Mux.send_segment mux ~protocol_id:pid ~timestamp:0l payload with
+    | Ok () -> () | Error e -> cleanup (); Alcotest.fail e
+  in
+  let recv mux =
+    match Mux.recv_segment mux with
+    | Error e -> cleanup (); Alcotest.fail e
+    | Ok (_, payload) ->
+      match Block_fetch.of_bytes payload with
+      | Error e -> cleanup (); Alcotest.fail e
+      | Ok msg -> msg
+  in
+  (* Client sends RequestRange *)
+  send client_out (MsgRequestRange (pt1, pt2));
+  ignore (recv server_in : Block_fetch.block_fetch_message);
+  (* Server sends NoBlocks *)
+  send server_out MsgNoBlocks;
+  (match recv client_in with
+   | MsgNoBlocks -> ()
+   | _ -> cleanup (); Alcotest.fail "expected NoBlocks");
+  cleanup ()
+
 let () =
   Alcotest.run "Block-Fetch"
     [ ( "Round-trips",
@@ -143,6 +254,8 @@ let () =
           Alcotest.test_case "BatchDone" `Quick test_batch_done ] );
       ( "CBOR tags",
         [ Alcotest.test_case "all tags" `Quick test_tags ] );
+      ( "Protocol ID",
+        [ Alcotest.test_case "mux framing" `Quick test_mux_protocol_id ] );
       ( "Valid transitions",
         [ Alcotest.test_case "idle->busy" `Quick test_idle_request_range;
           Alcotest.test_case "idle->done" `Quick test_idle_client_done;
@@ -158,4 +271,7 @@ let () =
         [ Alcotest.test_case "fetch range" `Quick test_full_fetch_sequence ] );
       ( "Agency",
         [ Alcotest.test_case "all states" `Quick test_agency ] );
+      ( "Pipe simulation",
+        [ Alcotest.test_case "full batch" `Quick test_pipe_full_batch;
+          Alcotest.test_case "no blocks" `Quick test_pipe_no_blocks ] );
     ]

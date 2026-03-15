@@ -1,7 +1,8 @@
 (** Ouroboros network layer.
 
     Connects the multiplexer to a TCP socket and provides high-level
-    operations for handshake, chain-sync, and mini-protocol messaging. *)
+    operations for handshake, chain-sync, block-fetch, and mini-protocol
+    messaging. Handles demultiplexing with per-protocol buffering. *)
 
 type t
 
@@ -39,6 +40,29 @@ val request_next : t -> (sync_event, string) result
 val await_next : t -> (sync_event, string) result
 
 val chain_sync_done : t -> (unit, string) result
+
+(** {1 Header point extraction} *)
+
+val extract_point_from_header :
+  Cbor.cbor_value -> (Chain_sync.point, string) result
+(** Extract a block point (slot + hash) from a chain-sync RollForward header.
+    Computes the block hash as Blake2b-256 of the serialized header bytes. *)
+
+(** {1 Block-fetch} *)
+
+type fetch_result =
+  | Batch_started
+  | No_blocks
+
+val request_range :
+  t -> from_point:Chain_sync.point -> to_point:Chain_sync.point ->
+  (fetch_result, string) result
+
+val recv_block : t -> (bytes option, string) result
+(** After [Batch_started], receive blocks one at a time.
+    Returns [Some bytes] per block, [None] when batch is complete. *)
+
+val block_fetch_done : t -> (unit, string) result
 
 (** {1 Connection management} *)
 

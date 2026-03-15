@@ -105,6 +105,7 @@ let decode_message = function
   | Cbor.Array [Cbor.Uint 2L] -> Ok MsgStartBatch
   | Cbor.Array [Cbor.Uint 3L] -> Ok MsgNoBlocks
   | Cbor.Array [Cbor.Uint 4L; Cbor.Bytes b] -> Ok (MsgBlock b)
+  | Cbor.Array [Cbor.Uint 4L; Cbor.Tag (24L, Cbor.Bytes b)] -> Ok (MsgBlock b)
   | Cbor.Array [Cbor.Uint 5L] -> Ok MsgBatchDone
   | _ -> Error "block_fetch: unrecognized message"
 
