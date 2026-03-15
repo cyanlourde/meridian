@@ -25,13 +25,7 @@ let check_encode msg expected_hex value =
   let encoded = Cbor.encode value in
   Alcotest.check bytes_testable msg (bytes_of_hex expected_hex) encoded
 
-let check_roundtrip msg value =
-  let encoded = Cbor.encode value in
-  match Cbor.decode encoded with
-  | Ok decoded -> Alcotest.check cbor_testable msg value decoded
-  | Error e -> Alcotest.fail (Printf.sprintf "decode failed: %s" e)
-
-and cbor_testable =
+let cbor_testable =
   let rec equal a b =
     match (a, b) with
     | Cbor.Uint a, Cbor.Uint b -> Int64.equal a b
@@ -93,6 +87,12 @@ and cbor_testable =
     | Cbor.IndefiniteMap _ -> Format.fprintf fmt "IndefiniteMap(...)"
   in
   Alcotest.testable pp equal
+
+let check_roundtrip msg value =
+  let encoded = Cbor.encode value in
+  match Cbor.decode encoded with
+  | Ok decoded -> Alcotest.check cbor_testable msg value decoded
+  | Error e -> Alcotest.fail (Printf.sprintf "decode failed: %s" e)
 
 (* ---- Major Type 0: Unsigned integers ---- *)
 
