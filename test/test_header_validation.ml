@@ -8,6 +8,8 @@ let make_header ?(slot = 100L) ?(block_number = 10L) ?(era = Block_decoder.Shell
     bh_slot = slot; bh_block_number = block_number;
     bh_prev_hash = prev_hash; bh_issuer_vkey = Bytes.make 32 '\xcc';
     bh_body_hash = body_hash; bh_protocol_version = proto; bh_era = era;
+    bh_vrf_vkey = Bytes.empty; bh_block_signature = Bytes.empty;
+    bh_opcert = None; bh_header_body_cbor = Bytes.empty;
   }
 
 (* ---- Slot number ---- *)

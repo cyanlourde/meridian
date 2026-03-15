@@ -2,6 +2,13 @@
 
 type era = Byron | Shelley | Allegra | Mary | Alonzo | Babbage | Conway
 
+type opcert = {
+  oc_hot_vkey : bytes;
+  oc_sequence_number : int64;
+  oc_kes_period : int64;
+  oc_cold_signature : bytes;
+}
+
 type block_header = {
   bh_slot : int64;
   bh_block_number : int64;
@@ -10,6 +17,10 @@ type block_header = {
   bh_body_hash : bytes;
   bh_protocol_version : int64 * int64;
   bh_era : era;
+  bh_vrf_vkey : bytes;
+  bh_block_signature : bytes;
+  bh_opcert : opcert option;
+  bh_header_body_cbor : bytes;
 }
 
 type decoded_block = {

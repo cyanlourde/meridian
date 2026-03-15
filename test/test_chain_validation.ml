@@ -33,6 +33,8 @@ let test_genesis_zero_hash () =
     bh_issuer_vkey = Bytes.empty;
     bh_body_hash = Bytes.empty;
     bh_protocol_version = (0L, 0L); bh_era = Byron;
+    bh_vrf_vkey = Bytes.empty; bh_block_signature = Bytes.empty;
+    bh_opcert = None; bh_header_body_cbor = Bytes.empty;
   } in
   match Chain_validation.validate_genesis_block header with
   | Ok () -> () | Error e -> Alcotest.fail e
@@ -44,6 +46,8 @@ let test_genesis_no_hash () =
     bh_issuer_vkey = Bytes.empty;
     bh_body_hash = Bytes.empty;
     bh_protocol_version = (0L, 0L); bh_era = Byron;
+    bh_vrf_vkey = Bytes.empty; bh_block_signature = Bytes.empty;
+    bh_opcert = None; bh_header_body_cbor = Bytes.empty;
   } in
   match Chain_validation.validate_genesis_block header with
   | Ok () -> () | Error e -> Alcotest.fail e
@@ -55,6 +59,8 @@ let test_genesis_nonzero_fails () =
     bh_issuer_vkey = Bytes.empty;
     bh_body_hash = Bytes.empty;
     bh_protocol_version = (0L, 0L); bh_era = Byron;
+    bh_vrf_vkey = Bytes.empty; bh_block_signature = Bytes.empty;
+    bh_opcert = None; bh_header_body_cbor = Bytes.empty;
   } in
   match Chain_validation.validate_genesis_block header with
   | Error _ -> () | Ok () -> Alcotest.fail "expected error"

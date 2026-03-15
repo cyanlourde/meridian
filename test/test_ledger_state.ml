@@ -31,6 +31,8 @@ let make_block ?(slot = 100L) ?(block_no = 1L) tx_bodies =
     bh_prev_hash = None; bh_issuer_vkey = Bytes.empty;
     bh_body_hash = Bytes.empty;
     bh_protocol_version = (2L, 0L); bh_era = Shelley;
+    bh_vrf_vkey = Bytes.empty; bh_block_signature = Bytes.empty;
+    bh_opcert = None; bh_header_body_cbor = Bytes.empty;
   } in
   Block_decoder.{
     db_era = Shelley; db_header = header;
