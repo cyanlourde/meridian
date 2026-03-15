@@ -13,3 +13,5 @@ module Local_tx_submission = Local_tx_submission
 module Local_tx_monitor = Local_tx_monitor
 module Consensus = Consensus
 module Crypto = Crypto
+module Tcp_connection = Tcp_connection
+module Network = Network
