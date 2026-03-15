@@ -10,5 +10,5 @@
         test_ledger_state test_crypto_real test_block_validator
         test_integration test_genesis test_conservation
         test_multi_asset test_mithril test_local_server
-        test_mempool test_block_forge test_slot_leader)
+        test_mempool test_block_forge test_slot_leader test_peer)
  (libraries meridian alcotest))
