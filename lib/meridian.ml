@@ -29,3 +29,6 @@ module Ledger_state = Ledger_state
 module Block_validator = Block_validator
 module Json = Json
 module Genesis = Genesis
+module Mithril_client = Mithril_client
+module Mithril_verify = Mithril_verify
+module Mithril_import = Mithril_import
