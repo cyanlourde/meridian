@@ -22,7 +22,7 @@ type block_error = {
 
 type t
 
-val create : ?params:protocol_params -> unit -> t
+val create : ?params:protocol_params -> ?skip_validation_before_slot:int64 -> unit -> t
 val utxo_count : t -> int
 val total_lovelace : t -> int64
 val tip : t -> int64 * int

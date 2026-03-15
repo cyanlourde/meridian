@@ -47,9 +47,12 @@ type t = {
   mutable tx_count : int;
   mutable validation_errors : int;
   params : protocol_params;
+  skip_validation_before_slot : int64;
+  (** Skip UTXO validation for bootstrap region (genesis delegation UTXOs
+      not in our initial set). Set to 0 to validate everything. *)
 }
 
-let create ?(params = shelley_params) () = {
+let create ?(params = shelley_params) ?(skip_validation_before_slot = 100L) () = {
   utxo = Utxo.create ();
   slot = 0L;
   epoch = 0L;
@@ -57,6 +60,7 @@ let create ?(params = shelley_params) () = {
   tx_count = 0;
   validation_errors = 0;
   params;
+  skip_validation_before_slot;
 }
 
 let utxo_count t = Utxo.size t.utxo
@@ -93,18 +97,20 @@ let apply_block t (block : Block_decoder.decoded_block) =
     match Tx_decoder.decode_transaction ~era:block.db_era tx_cbor with
     | Error _e -> ()
     | Ok tx ->
-      let errs = Utxo.validate_tx
-        ~min_fee_a:t.params.min_fee_a
-        ~min_fee_b:t.params.min_fee_b
-        ~min_utxo_value:t.params.min_utxo_value
-        ~key_deposit:t.params.key_deposit
-        ~pool_deposit:t.params.pool_deposit
-        ~utxo:t.utxo ~current_slot:slot tx in
-      (* Separate real errors from warnings *)
-      let real_errors = List.filter (fun e -> not (Utxo.is_warning e)) errs in
-      if real_errors <> [] then begin
-        errors := { be_slot = slot; be_tx_index = tx_idx; be_errors = real_errors } :: !errors;
-        t.validation_errors <- t.validation_errors + List.length real_errors
+      (* Skip validation in bootstrap region (genesis delegation UTXOs) *)
+      if Int64.compare slot t.skip_validation_before_slot >= 0 then begin
+        let errs = Utxo.validate_tx
+          ~min_fee_a:t.params.min_fee_a
+          ~min_fee_b:t.params.min_fee_b
+          ~min_utxo_value:t.params.min_utxo_value
+          ~key_deposit:t.params.key_deposit
+          ~pool_deposit:t.params.pool_deposit
+          ~utxo:t.utxo ~current_slot:slot tx in
+        let real_errors = List.filter (fun e -> not (Utxo.is_warning e)) errs in
+        if real_errors <> [] then begin
+          errors := { be_slot = slot; be_tx_index = tx_idx; be_errors = real_errors } :: !errors;
+          t.validation_errors <- t.validation_errors + List.length real_errors
+        end
       end;
       (* Always apply (even with errors — we're syncing, not producing) *)
       let tx_hash = tx_hash_of_cbor tx_cbor in
