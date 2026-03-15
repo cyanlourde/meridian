@@ -7,3 +7,7 @@ module Chain_sync = Chain_sync
 module Block_fetch = Block_fetch
 module Tx_submission = Tx_submission
 module Keep_alive = Keep_alive
+module Local_chain_sync = Local_chain_sync
+module Local_state_query = Local_state_query
+module Local_tx_submission = Local_tx_submission
+module Local_tx_monitor = Local_tx_monitor

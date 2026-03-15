@@ -1,4 +1,6 @@
 (tests
  (names test_cbor test_cardano_types test_mux test_handshake test_chain_sync
-        test_block_fetch test_tx_submission test_keep_alive)
+        test_block_fetch test_tx_submission test_keep_alive
+        test_local_chain_sync test_local_state_query
+        test_local_tx_submission test_local_tx_monitor)
  (libraries meridian alcotest))
