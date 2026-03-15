@@ -11,3 +11,4 @@ module Local_chain_sync = Local_chain_sync
 module Local_state_query = Local_state_query
 module Local_tx_submission = Local_tx_submission
 module Local_tx_monitor = Local_tx_monitor
+module Consensus = Consensus
