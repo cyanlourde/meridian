@@ -43,4 +43,7 @@ module Block_fetch_server = Block_fetch_server
 module Peer_manager = Peer_manager
 module Block_propagation = Block_propagation
 module Governance = Governance
+module Topology = Topology
+module Peer_scoring = Peer_scoring
+module Peer_discovery = Peer_discovery
 module Local_server = Local_server
