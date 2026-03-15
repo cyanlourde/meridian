@@ -1,30 +1,30 @@
 # Meridian Roadmap
 
 ## Phase 1 — Foundation (Weeks 1-6)
-- [ ] CBOR encoding/decoding library (from CDDL spec)
-- [ ] Basic binary serialization primitives
-- [ ] Cardano address parsing
-- [ ] Block/transaction type definitions (all eras)
-- [ ] Unit tests against known test vectors
+- [x] CBOR encoding/decoding library (from CDDL spec)
+- [x] Basic binary serialization primitives
+- [x] Cardano address parsing
+- [x] Block/transaction type definitions (all eras)
+- [x] Unit tests against known test vectors
 
 ## Phase 2 — Networking (Weeks 4-10)
-- [ ] Ouroboros multiplexer (mini-protocol framing)
-- [ ] Handshake mini-protocol
-- [ ] Chain-sync mini-protocol (node-to-node)
-- [ ] Block-fetch mini-protocol
-- [ ] Tx-submission mini-protocol (node-to-node)
-- [ ] Keep-alive mini-protocol
-- [ ] Chain-sync mini-protocol (node-to-client)
-- [ ] State-query mini-protocol (node-to-client)
-- [ ] Tx-submission mini-protocol (node-to-client)
-- [ ] Tx-monitor mini-protocol (node-to-client)
+- [x] Ouroboros multiplexer (mini-protocol framing)
+- [x] Handshake mini-protocol
+- [x] Chain-sync mini-protocol (node-to-node)
+- [x] Block-fetch mini-protocol
+- [x] Tx-submission mini-protocol (node-to-node)
+- [x] Keep-alive mini-protocol
+- [x] Chain-sync mini-protocol (node-to-client)
+- [x] State-query mini-protocol (node-to-client)
+- [x] Tx-submission mini-protocol (node-to-client)
+- [x] Tx-monitor mini-protocol (node-to-client)
 
 ## Phase 3 — Consensus (Weeks 8-16)
-- [ ] Ouroboros Praos chain selection
-- [ ] VRF verification (libsodium bindings)
-- [ ] KES signature verification
-- [ ] Slot leader check
-- [ ] Epoch transition logic
+- [x] Ouroboros Praos chain selection
+- [x] VRF verification (libsodium bindings) — stub, awaiting system libsodium-dev
+- [x] KES signature verification — stub, awaiting KES library
+- [x] Slot leader check
+- [x] Epoch transition logic
 
 ## Phase 4 — Ledger (Weeks 6-24)
 - [ ] Byron era ledger rules
