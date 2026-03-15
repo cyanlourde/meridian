@@ -57,12 +57,20 @@
 - `inspect` — block/header/tx pretty-printing from stored data
 - `integration_test.sh` — automated multi-phase sync + resume verification
 
+#### Multi-Asset UTXO
+- Full multi-asset value type: policy_id → asset_name → quantity maps with add, subtract, equal, filter (lib/multi_asset.ml)
+- Transaction outputs carry full multi-asset values, not just lovelace (lib/tx_decoder.ml)
+- UTXO set tracks multi-asset values per output (lib/utxo.ml)
+- Conservation equation: consumed + mint = produced (full multi-asset, not just ADA)
+- Mint/burn parsing: positive quantities for minting, negative for burning (lib/multi_asset.ml)
+- Removed Conservation_warning — all checks are now exact multi-asset comparisons
+
 ### Verified against real Cardano network
 - Handshake v15 negotiated with preview-node.play.dev.cardano.org:3001
-- 2950+ blocks synced with zero validation errors
-- 8 automatic reconnections, all resumed correctly from snapshot
-- Full validation pipeline: header + crypto + UTXO on every block
-- 472 tests across 30 suites
+- 5400+ blocks synced with **zero validation errors** (full multi-asset conservation)
+- 9+ automatic reconnections, all resumed correctly from snapshot
+- Full validation pipeline: header + crypto + multi-asset UTXO on every block
+- 489 tests across 31 suites
 
 ## [0.1.0-dev] - 2026-03-15
 
