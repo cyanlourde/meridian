@@ -25,3 +25,4 @@ val block_count : store -> int
 
 val get_recent_blocks : store -> count:int -> (int64 * bytes) list
 val get_chain_points : store -> Chain_sync.point list
+val flush_meta : store -> unit

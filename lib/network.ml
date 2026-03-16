@@ -222,6 +222,37 @@ let await_next t =
   | MsgRollBackward (point, tip) -> Ok (Roll_backward { point; tip })
   | _ -> Error "chain_sync: unexpected message while awaiting"
 
+(** Pipelined chain-sync: send [n] MsgRequestNext messages at once,
+    then read all [n] responses. Eliminates N-1 round-trips per batch. *)
+let pipeline_request_next t ~count =
+  (* Send all requests *)
+  let rec send_all n =
+    if n = 0 then Ok ()
+    else let* () = send_chain_sync t MsgRequestNext in send_all (n - 1)
+  in
+  let* () = send_all count in
+  (* Read all responses *)
+  let results = ref [] in
+  let remaining = ref count in
+  let at_tip = ref false in
+  let err = ref None in
+  while !remaining > 0 && not !at_tip && !err = None do
+    match recv_chain_sync t with
+    | Ok (MsgRollForward (header, tip)) ->
+      results := Roll_forward { header; tip } :: !results;
+      decr remaining
+    | Ok (MsgRollBackward (point, tip)) ->
+      results := Roll_backward { point; tip } :: !results;
+      decr remaining
+    | Ok MsgAwaitReply ->
+      at_tip := true
+    | Ok _ -> decr remaining
+    | Error e -> err := Some e
+  done;
+  match !err with
+  | Some e -> Error e
+  | None -> Ok (List.rev !results, !at_tip)
+
 let chain_sync_done t =
   send_chain_sync t MsgDone
 

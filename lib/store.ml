@@ -34,12 +34,14 @@ type store = {
   index_path : string;
   meta_path : string;
   mutable index : block_entry array;
-  (** Sorted by slot (ascending), then hash for ties *)
+  (** Sorted by slot (ascending). Over-allocated with capacity for amortized O(1) append. *)
   mutable block_count : int;
-  (** Cache of most recent k blocks for fast access *)
+  mutable meta_dirty : int;
+  (** Number of blocks stored since last meta write — batch meta updates *)
   recent_cache : (string, bytes) Hashtbl.t;  (** hash_hex -> cbor_bytes *)
   mutable cache_order : string list;  (** Most recent first *)
   cache_max : int;  (** k = 2160 *)
+  lock_fd : Unix.file_descr;  (** Held for process lifetime to prevent concurrent access *)
 }
 
 (* ================================================================ *)
@@ -76,27 +78,19 @@ let atomic_write path data =
   Unix.close fd;
   Unix.rename tmp path
 
-(** Append bytes to a file atomically by copying + rename.
-    For the index file, we write the full updated content. *)
+(** Append bytes to the index file using O_APPEND.
+    Each entry is a fixed-size record, so partial writes are detectable
+    on recovery (truncate to nearest 40-byte boundary). *)
 let append_to_file path data =
-  let existing =
-    if Sys.file_exists path then begin
-      let fd = Unix.openfile path [Unix.O_RDONLY] 0 in
-      let st = Unix.fstat fd in
-      let buf = Bytes.create st.Unix.st_size in
-      let rec go off remaining =
-        if remaining = 0 then ()
-        else let n = Unix.read fd buf off remaining in go (off + n) (remaining - n)
-      in
-      go 0 st.st_size;
-      Unix.close fd;
-      buf
-    end else Bytes.empty
+  let fd = Unix.openfile path
+    [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644 in
+  let len = Bytes.length data in
+  let rec go off remaining =
+    if remaining = 0 then ()
+    else let n = Unix.write fd data off remaining in go (off + n) (remaining - n)
   in
-  let combined = Bytes.create (Bytes.length existing + Bytes.length data) in
-  Bytes.blit existing 0 combined 0 (Bytes.length existing);
-  Bytes.blit data 0 combined (Bytes.length existing) (Bytes.length data);
-  atomic_write path combined
+  (try go 0 len with e -> Unix.close fd; raise e);
+  Unix.close fd
 
 (* ================================================================ *)
 (* Block path                                                        *)
@@ -186,22 +180,39 @@ let cache_add store hash_hex cbor_bytes =
 (* Public API                                                        *)
 (* ================================================================ *)
 
-(** Initialize the store. Creates directories if needed, loads existing index. *)
+(** Acquire an exclusive lock file, preventing concurrent access. *)
+let acquire_lock base_dir =
+  let lock_path = Filename.concat base_dir "store.lock" in
+  let fd = Unix.openfile lock_path [Unix.O_WRONLY; Unix.O_CREAT] 0o644 in
+  (try Unix.lockf fd Unix.F_TLOCK 0
+   with Unix.Unix_error (Unix.EAGAIN, _, _) | Unix.Unix_error (Unix.EACCES, _, _) ->
+     Unix.close fd;
+     failwith (Printf.sprintf "Store locked: another process is using %s" base_dir));
+  let pid = Printf.sprintf "%d\n" (Unix.getpid ()) in
+  let b = Bytes.of_string pid in
+  ignore (Unix.write fd b 0 (Bytes.length b));
+  fd
+
+(** Initialize the store. Creates directories if needed, loads existing index.
+    Acquires an exclusive lock to prevent concurrent access. *)
 let init ?(cache_max = 2160) ~base_dir () =
   ensure_dir_p base_dir;
+  let lock_fd = acquire_lock base_dir in
   let blocks_dir = Filename.concat base_dir "blocks" in
   ensure_dir blocks_dir;
   let index_path = Filename.concat base_dir "chain.index" in
   let meta_path = Filename.concat base_dir "store.meta" in
-  let index = load_index index_path in
-  let s = {
-    base_dir; blocks_dir; index_path; meta_path;
-    index; block_count = Array.length index;
+  let loaded = load_index index_path in
+  let count = Array.length loaded in
+  (* Over-allocate to avoid per-block array copies *)
+  let capacity = max (count * 2) 8192 in
+  let index = Array.make capacity { slot = 0L; hash = Bytes.empty } in
+  Array.blit loaded 0 index 0 count;
+  { base_dir; blocks_dir; index_path; meta_path;
+    index; block_count = count; meta_dirty = 0;
     recent_cache = Hashtbl.create (min cache_max 256);
     cache_order = [];
-    cache_max;
-  } in
-  s
+    cache_max; lock_fd }
 
 (** Store a block. Writes the block file, appends to index, updates metadata.
     Returns Ok () on success. Idempotent: storing the same block twice is a no-op. *)
@@ -214,17 +225,24 @@ let store_block store ~slot ~hash ~cbor_bytes =
     (* Append to index *)
     let entry_bytes = encode_entry slot hash in
     append_to_file store.index_path entry_bytes;
-    (* Update in-memory index *)
+    (* Update in-memory index — grow with doubling when full *)
     let entry = { slot; hash } in
-    let new_index = Array.make (store.block_count + 1) entry in
-    Array.blit store.index 0 new_index 0 store.block_count;
-    new_index.(store.block_count) <- entry;
-    store.index <- new_index;
+    if store.block_count >= Array.length store.index then begin
+      let new_cap = Array.length store.index * 2 in
+      let new_index = Array.make new_cap { slot = 0L; hash = Bytes.empty } in
+      Array.blit store.index 0 new_index 0 store.block_count;
+      store.index <- new_index
+    end;
+    store.index.(store.block_count) <- entry;
     store.block_count <- store.block_count + 1;
     (* Update cache *)
     cache_add store (hex_of_bytes hash) cbor_bytes;
-    (* Update metadata *)
-    write_meta store;
+    (* Batch metadata writes — every 100 blocks or on demand *)
+    store.meta_dirty <- store.meta_dirty + 1;
+    if store.meta_dirty >= 100 then begin
+      write_meta store;
+      store.meta_dirty <- 0
+    end;
     Ok ()
   end
 
@@ -297,3 +315,10 @@ let get_chain_points store =
       else None
     ) offsets in
     points @ [Chain_sync.Origin]
+
+(** Flush any pending metadata to disk. Call before shutdown. *)
+let flush_meta store =
+  if store.meta_dirty > 0 then begin
+    write_meta store;
+    store.meta_dirty <- 0
+  end

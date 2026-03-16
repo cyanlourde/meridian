@@ -44,6 +44,12 @@ val find_intersection :
 
 val request_next : t -> (sync_event, string) result
 val await_next : t -> (sync_event, string) result
+
+val pipeline_request_next :
+  t -> count:int -> (sync_event list * bool, string) result
+(** Send [count] MsgRequestNext pipelined, then read all responses.
+    Returns [(events, at_tip)]. Eliminates N-1 round-trips per batch. *)
+
 val chain_sync_done : t -> (unit, string) result
 
 (** {1 Header point extraction} *)
