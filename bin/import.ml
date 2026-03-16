@@ -73,7 +73,9 @@ let () =
         (match Mithril_verify.verify_snapshot_digest
                  ~expected_digest:snap.digest ~snapshot_path:dest with
          | Ok () -> Printf.printf "Digest verified OK\n%!"
-         | Error e -> Printf.printf "Digest verification: %s (continuing anyway)\n%!" e);
+         | Error e ->
+           Printf.eprintf "Digest verification FAILED: %s\nSnapshot may be corrupted or tampered with. Please redownload.\n%!" e;
+           exit 1);
 
         dest
     end in

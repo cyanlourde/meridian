@@ -3,4 +3,4 @@
  (public_name meridian)
  (libraries unix)
  (foreign_stubs (language c) (names libsodium_stubs))
- (c_library_flags (-ldl)))
+ (c_library_flags (-ldl /usr/local/lib/libsodium.a)))

@@ -9,7 +9,16 @@ LOG="$DATA_DIR/sync.log"
 echo "$(date): Starting Meridian sync wrapper (data=$DATA_DIR, network=$NETWORK)" >> "$LOG"
 
 while true; do
-    rm -f "$DATA_DIR/store.lock"
+    LOCKFILE="$DATA_DIR/store.lock"
+    if [ -f "$LOCKFILE" ]; then
+        LOCK_PID=$(cat "$LOCKFILE" 2>/dev/null | tr -d '[:space:]')
+        if [ -n "$LOCK_PID" ] && kill -0 "$LOCK_PID" 2>/dev/null; then
+            echo "$(date): Another sync process is running (PID $LOCK_PID). Exiting." >> "$LOG"
+            exit 1
+        fi
+        echo "$(date): Removing stale lock (PID $LOCK_PID no longer running)" >> "$LOG"
+        rm -f "$LOCKFILE"
+    fi
     echo "$(date): Launching sync..." >> "$LOG"
     dune exec bin/sync.exe -- \
         --data-dir "$DATA_DIR" \
