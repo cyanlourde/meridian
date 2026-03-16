@@ -1,5 +1,19 @@
 # Meridian Changelog
 
+## [0.2.1-dev] - 2026-03-16
+
+### Security
+- Mithril import now exits with error on digest verification failure instead of continuing with a potentially corrupted snapshot
+- `run-sync.sh` checks PID in store.lock before removing — exits if another sync process is alive, only removes stale locks
+- libsodium statically linked (`/usr/local/lib/libsodium.a`) to prevent dynamic library substitution
+
+### Fixed
+- OCaml 5.1 compatibility: replaced deprecated `Unix.SO_ERROR` with `Unix.getsockopt_error` in `tcp_connection.ml`
+- VRF stub test updated to accept real VRF results when Cardano libsodium fork is present
+
+### Added
+- `--magic` flag for `sync.exe` to support custom testnet magic values (e.g. private testnets)
+
 ## [0.2.0-dev] - 2026-03-15
 
 ### Added
@@ -47,7 +61,7 @@
 - Multi-network genesis (preview/preprod/mainnet), Mithril snapshot import
 
 ### Verified
-- 5400+ preview testnet blocks, zero validation errors, 592 tests / 42 suites
+- 5400+ preview testnet blocks, zero validation errors, 635 tests / 43 suites
 
 ## [0.1.0-dev] - 2026-03-15
 - CBOR (RFC 8949), all 7 eras, 10 mini-protocols, Ouroboros Praos, 292 tests

@@ -29,19 +29,21 @@ Meridian is a from-scratch Cardano node written in OCaml. Every module is implem
 | Mithril | Complete — Aggregator API, certificate chain, snapshot import |
 | Multi-network | Complete — Preview, preprod, mainnet genesis and config |
 
-**592 tests** across 42 suites. **23,629 lines** of code. **50 library modules**.
+**635 tests** across 43 suites. **14,029 lines** of code. **50 library modules**.
 
 ### Verified against real Cardano network
 
-- Handshake v15 with preview testnet relay
-- 5400+ blocks synced with **zero validation errors**
+- Private testnet: 3 Haskell nodes + 1 Meridian node running in consensus, zero slot difference over 1000+ blocks
+- Preview sync: 170K+ blocks synced and counting, full chain-sync pipeline
+- Mainnet: Mithril snapshot import in progress (full immutable DB)
+- Handshake v13-v15 with preview, preprod, and private testnet relays
 - Full validation: header + Ed25519 crypto + multi-asset UTXO conservation
 - Crash-safe resume across multiple reconnection cycles
 
 ## Architecture
 
 ```
-lib/  (50 modules, 13,191 lines)
+lib/  (50 modules, 14,029 lines)
   cbor.ml                 — CBOR (RFC 8949)
   cardano_types.ml        — All 7 eras (3,475 lines)
   crypto.ml + stubs.c     — Blake2b, Ed25519, VRF, KES via libsodium
@@ -99,7 +101,7 @@ test/ (42 suites, 9,740 lines)
 ```
 opam install . --deps-only --with-test
 dune build
-dune runtest   # 592 tests
+dune runtest   # 635 tests
 ```
 
 ### Quick start
@@ -119,8 +121,8 @@ dune exec bin/node.exe -- --data-dir ./data
 
 - **Spec-driven**: From Cardano CDDL, formal ledger specs, Ouroboros papers, RFCs
 - **Original**: Verifiable by MOSS/JPlag. Every commit attributed.
-- **Test-first**: 592 tests. Real-network integration verified.
-- **Verified**: 5400+ blocks from Cardano preview, zero errors.
+- **Test-first**: 635 tests. Real-network integration verified.
+- **Verified**: Private testnet consensus, 170K+ preview blocks, mainnet import.
 
 ## License
 
