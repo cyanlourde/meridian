@@ -104,20 +104,27 @@ let fetch_range net store pts_arr offset count =
       done;
       Ok !stored
 
+(** Check if any block in a chunk is missing from the store. *)
+let chunk_has_missing store pts_arr offset count =
+  let found_missing = ref false in
+  let i = ref 0 in
+  while not !found_missing && !i < count do
+    (match pts_arr.(offset + !i) with
+     | Chain_sync.Point (_slot, hash) ->
+       if not (Store.has_block store ~hash) then found_missing := true
+     | _ -> ());
+    incr i
+  done;
+  !found_missing
+
 (** Fetch block bodies for a list of points and store them.
-    Filters out already-stored blocks, then chunks remaining into ranges.
-    Returns the number of blocks successfully stored. *)
+    Chunks into ranges of max_range. Skips chunks where all blocks
+    already exist. Returns the number of new blocks stored. *)
 let fetch_and_store net store points =
-  (* Filter to only blocks we don't already have *)
-  let needed = List.filter (fun pt ->
-    match pt with
-    | Chain_sync.Point (_slot, hash) -> not (Store.has_block store ~hash)
-    | _ -> true
-  ) points in
-  match needed with
+  match points with
   | [] | [_] -> Ok 0
   | _ ->
-    let pts_arr = Array.of_list needed in
+    let pts_arr = Array.of_list points in
     let total = Array.length pts_arr in
     let max_range = 100 in
     let stored = ref 0 in
@@ -127,6 +134,9 @@ let fetch_and_store net store points =
       let count = min max_range (total - !offset) in
       if count < 2 then begin
         offset := total
+      end else if not (chunk_has_missing store pts_arr !offset count) then begin
+        (* All blocks in chunk exist, skip fetch *)
+        offset := !offset + count
       end else begin
         match fetch_range net store pts_arr !offset count with
         | Ok n -> stored := !stored + n; offset := !offset + count
