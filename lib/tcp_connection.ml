@@ -60,11 +60,11 @@ let connect ?(timeout_s = 30.0) ~host ~port () =
           Error Timeout
         end else begin
           (* Check for connection error via getsockopt *)
-          let err = Unix.getsockopt_int fd Unix.SO_ERROR in
-          if err <> 0 then begin
+          match Unix.getsockopt_error fd with
+          | Some err ->
             Unix.close fd;
-            Error (Connection_refused (Printf.sprintf "SO_ERROR=%d" err))
-          end else
+            Error (Connection_refused (Printf.sprintf "SO_ERROR: %s" (Unix.error_message err)))
+          | None ->
             Ok ()
         end
       | Unix.Unix_error (Unix.ECONNREFUSED, _, _) ->

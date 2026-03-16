@@ -136,7 +136,8 @@ let test_ed25519_bad_key_size () =
 let test_vrf_stub () =
   match Crypto.vrf_verify ~public_key:Bytes.empty ~proof:Bytes.empty ~message:Bytes.empty with
   | Error _ -> ()
-  | Ok _ -> Alcotest.fail "expected stub error"
+  | Ok (_, false) -> () (* real VRF rejects invalid input *)
+  | Ok (_, true) -> Alcotest.fail "expected stub error or verification failure"
 
 let test_kes_stub () =
   match Crypto.kes_verify ~public_key:Bytes.empty ~period:0 ~message:Bytes.empty ~signature:Bytes.empty with
