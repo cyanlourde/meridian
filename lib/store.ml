@@ -140,7 +140,16 @@ let load_index path =
     go 0 st.st_size;
     Unix.close fd;
     let count = st.st_size / entry_size in
-    Array.init count (fun i -> decode_entry buf (i * entry_size))
+    let raw = Array.init count (fun i -> decode_entry buf (i * entry_size)) in
+    (* Deduplicate: O_APPEND can produce duplicates across restarts *)
+    let seen = Hashtbl.create (Array.length raw) in
+    let deduped = Array.to_list raw |> List.filter (fun e ->
+      let key = (e.slot, e.hash) in
+      if Hashtbl.mem seen key then false
+      else (Hashtbl.replace seen key (); true)
+    ) in
+    let sorted = List.sort (fun a b -> Int64.compare a.slot b.slot) deduped in
+    Array.of_list sorted
   end
 
 (* ================================================================ *)
@@ -221,7 +230,16 @@ let store_block store ~slot ~hash ~cbor_bytes =
   if Sys.file_exists path then Ok ()  (* already stored *)
   else begin
     ensure_dir dir;
-    atomic_write path cbor_bytes;
+    (* Write block directly — no temp+rename needed since block files
+       are content-addressed and immutable. Avoids WSL2 rename race. *)
+    let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644 in
+    let len = Bytes.length cbor_bytes in
+    let rec go off remaining =
+      if remaining = 0 then ()
+      else let n = Unix.write fd cbor_bytes off remaining in go (off + n) (remaining - n)
+    in
+    (try go 0 len with e -> Unix.close fd; raise e);
+    Unix.close fd;
     (* Append to index *)
     let entry_bytes = encode_entry slot hash in
     append_to_file store.index_path entry_bytes;

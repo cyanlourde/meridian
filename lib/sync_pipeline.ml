@@ -105,22 +105,28 @@ let fetch_range net store pts_arr offset count =
       Ok !stored
 
 (** Fetch block bodies for a list of points and store them.
-    Chunks into ranges of max_range to avoid protocol limits.
+    Filters out already-stored blocks, then chunks remaining into ranges.
     Returns the number of blocks successfully stored. *)
 let fetch_and_store net store points =
-  match points with
+  (* Filter to only blocks we don't already have *)
+  let needed = List.filter (fun pt ->
+    match pt with
+    | Chain_sync.Point (_slot, hash) -> not (Store.has_block store ~hash)
+    | _ -> true
+  ) points in
+  match needed with
   | [] | [_] -> Ok 0
   | _ ->
-    let pts_arr = Array.of_list points in
+    let pts_arr = Array.of_list needed in
     let total = Array.length pts_arr in
-    let max_range = 100 in  (* chunk into manageable ranges *)
+    let max_range = 100 in
     let stored = ref 0 in
     let offset = ref 0 in
     let ok = ref true in
     while !ok && !offset < total do
       let count = min max_range (total - !offset) in
       if count < 2 then begin
-        offset := total  (* skip remaining singleton *)
+        offset := total
       end else begin
         match fetch_range net store pts_arr !offset count with
         | Ok n -> stored := !stored + n; offset := !offset + count
